@@ -1,0 +1,22 @@
+# PostgreSQL cho Xóm Vui (chạy: docker compose up -d)
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: xomvui_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: xomvui
+      POSTGRES_PASSWORD: xomvui
+      POSTGRES_DB: xomvui
+    ports:
+      - "5434:5432" # 5433 đã có Postgres của dự án khác
+    volumes:
+      - xomvui_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xomvui"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  xomvui_pgdata:

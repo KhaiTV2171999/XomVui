@@ -1,0 +1,11 @@
+node_modules
+dist
+server/data
+*.log
+.env
+.env.local
+*.db
+*.db-wal
+*.db-shm
+.tmp
+artifacts
