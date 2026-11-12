@@ -36,7 +36,19 @@ function publicState() {
     viewers: getIo().sockets.adapter.rooms.get(ROOM)?.size ?? 0,
     players: st.bets.size,
     lastWinners: st.lastWinners,
+    seated: seatedPlayers(),
   };
+}
+
+/** Người đang ngồi ở bàn (trong phòng bầu cua): ai cược nhiều đứng trước, tối đa 16 người. */
+function seatedPlayers() {
+  const ids = getIo().sockets.adapter.rooms.get(ROOM);
+  if (!ids) return [];
+  return [...online.values()]
+    .filter((p) => ids.has(p.socket.id))
+    .map((p) => ({ id: p.userId, name: p.name, appearance: p.appearance, bet: (st.bets.get(p.userId) ?? []).reduce((a, b) => a + b, 0) }))
+    .sort((a, b) => b.bet - a.bet)
+    .slice(0, 16);
 }
 
 function broadcast() {
@@ -110,6 +122,7 @@ export function registerBauCua(socket: Socket, p: OnlinePlayer) {
 
   handle(socket, 'bc:leave', () => {
     socket.leave(ROOM);
+    broadcast();
   });
 
   handle<{ symbol: number; amount: number }>(socket, 'bc:bet', async ({ symbol, amount }) => {
@@ -150,4 +163,16 @@ export function registerBauCua(socket: Socket, p: OnlinePlayer) {
     await pushMe(uid);
     return { myBets: [0, 0, 0, 0, 0, 0] };
   });
+}
+
+/** Tóm tắt cho sảnh Khu giải trí. */
+export function bcOverview() {
+  return {
+    phase: st.phase,
+    endsAt: st.endsAt,
+    players: st.bets.size,
+    pot: st.totals.reduce((a, b) => a + b, 0),
+    last: st.history[0] ?? null,
+    winners: st.lastWinners,
+  };
 }

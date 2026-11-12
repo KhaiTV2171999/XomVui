@@ -563,11 +563,12 @@ export class WorldScene extends Phaser.Scene {
   }
 
   /** Chó phát hiện kẻ trộm: lao tới sủa rồi rượt ra cổng. */
-  onDogChase({ thiefId, plot }: { thiefId: number; plot: number }) {
+  onDogChase({ thiefId, plot, animal }: { thiefId: number; plot?: number; animal?: number }) {
     const dog = this.dog;
     if (!dog || this.zone?.kind !== 'farm') return;
     const thief = this.players.get(thiefId);
-    const target = thief ? { x: thief.x, y: thief.y } : plotPos(plot);
+    const fallback = animal != null ? this.animalViews[animal]?.icon : null;
+    const target = thief ? { x: thief.x, y: thief.y } : fallback ? { x: fallback.x, y: fallback.y } : plotPos(plot ?? 0);
     this.dogChasing = true;
     this.dogTween?.stop();
     dog.setVisible(true).setFlipX(target.x < dog.x);
@@ -661,8 +662,12 @@ export class WorldScene extends Phaser.Scene {
         this.wander(v);
       }
       const remain = animalRemainMs(an);
-      if (remain < 0) v.status.setText('🌾');
-      else if (remain === 0) v.status.setText(ITEMS[def.product].icon);
+      if (remain < 0) v.status.setText(owner ? '🌾' : '');
+      else if (remain === 0) {
+        // Chủ: biểu tượng sản phẩm để thu; khách: 🖐️ nếu còn lấy trộm được
+        const canSteal = !owner && !(an.stolenBy ?? []).includes(meId) && (an.left ?? def.qty) > stealFloor(def.qty);
+        v.status.setText(owner ? ITEMS[def.product].icon : canSteal ? '🖐️' : '');
+      }
       else {
         v.barBg.setVisible(true);
         v.bar.setVisible(true).setSize(54 * (1 - remain / an.produceMs), 5);
@@ -764,7 +769,18 @@ export class WorldScene extends Phaser.Scene {
       if (owner && i === farm.animals.length) set({ panel: 'shop', shopTab: 'animal' });
       return;
     }
-    if (!owner) return toast(`${ANIMALS[an.type].name} của ${this.zone?.ownerName}`);
+    if (!owner) {
+      // Khách: lấy trộm sản phẩm khi vật nuôi đã có
+      if (animalRemainMs(an) !== 0) return toast(`${ANIMALS[an.type].name} của ${this.zone?.ownerName} chưa có gì để lấy`);
+      const r = await call('farm:stealAnimal', { owner: this.zone!.ownerId, idx: i });
+      if (r.ok && r.caught) toast(`🐕 Bị chó đuổi! Mất ${r.fine} xu tiền phạt`, 'error');
+      else if (r.ok) {
+        sfx('harvest');
+        this.flyToBag(v.icon.x, v.icon.y - 40, ITEMS[r.item].icon, 1);
+        this.floatText(v.icon.x, v.icon.y - 60, `+1 ${ITEMS[r.item].icon} 😈`, '#ffd6e8');
+      }
+      return;
+    }
     const def = ANIMALS[an.type];
     const remain = animalRemainMs(an);
     if (remain < 0) {

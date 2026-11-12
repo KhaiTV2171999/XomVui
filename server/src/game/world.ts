@@ -87,8 +87,16 @@ export function registerWorld(socket: Socket, p: OnlinePlayer) {
     const t = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
     if (!t) return;
     p.lastChat = now;
-    getIo().to(room(p.zone)).emit('player:chat', { id: p.userId, name: p.name, text: t });
+    // Chat cộng đồng: gửi tới mọi người đang online (bong bóng chỉ hiện với ai cùng khu).
+    const msg = { id: p.userId, name: p.name, text: t, at: now };
+    recentChat.push(msg);
+    if (recentChat.length > 30) recentChat.shift();
+    getIo().emit('player:chat', msg);
   });
+
+  handle(socket, 'chat:history', () => ({ messages: recentChat }));
 }
+
+const recentChat: { id: number; name: string; text: string; at: number }[] = [];
 
 export const PUBLIC_ZONES = Object.keys(ZONES).filter((z) => z !== 'farm');

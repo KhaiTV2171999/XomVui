@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { bus, call, send } from '../net';
 import { fmt, set, toast, useStore } from '../store';
-import { Modal } from './common';
+import { AvatarPreview, Modal } from './common';
+import type { Appearance } from '../../../shared/catalog';
 import { sfx } from '../sound';
 
 export const BC_SYMBOLS = [
@@ -17,10 +18,12 @@ interface BcState {
   round: number; phase: 'betting' | 'rolling' | 'result'; endsAt: number; now: number;
   totals: number[]; dice: number[] | null; history: number[][]; viewers: number; players: number;
   lastWinners: { name: string; win: number }[];
+  seated?: { id: number; name: string; appearance: Appearance; bet: number }[];
 }
 
 export function BauCuaPanel() {
   const coins = useStore((s) => s.me?.coins ?? 0);
+  const meId = useStore((s) => s.me?.id);
   const [st, setSt] = useState<BcState | null>(null);
   const [myBets, setMyBets] = useState([0, 0, 0, 0, 0, 0]);
   const [chips, setChips] = useState<number[]>([10, 50, 100, 500, 1000, 5000]);
@@ -85,69 +88,113 @@ export function BauCuaPanel() {
     if (r.ok) setMyBets(r.myBets);
   }
 
-  return (
-    <Modal title="🎲 Bầu Cua Tôm Cá" onClose={() => set({ panel: null })} wide className="bc-modal">
-      <div className="bc-top">
-        <div className={`bc-phase ${st.phase}`}>
-          {betting ? <>Đặt cược · <b>{remain}s</b></> : st.phase === 'rolling' ? 'Đang lắc...' : 'Kết quả'}
-        </div>
-        <div className="bc-info">👀 {st.viewers} người xem · 🎯 {st.players} người cược</div>
-      </div>
+  const BET_SECONDS = 20;
+  const ringPct = betting ? Math.min(1, remain / BET_SECONDS) : 0;
+  const pot = st.totals.reduce((a, b) => a + b, 0);
 
-      <div className="bc-bowl">
-        <div className={`bc-plate ${st.phase}`}>
-          {faces ? faces.map((d, i) => (
-            <div key={i} className={`die ${st.phase === 'rolling' ? 'shake' : 'pop'}`} style={{ animationDelay: `${i * 0.08}s` }}>
-              {BC_SYMBOLS[d].icon}
-            </div>
-          )) : <div className="bc-cover">🥣</div>}
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) set({ panel: null }); }}>
+      <div className="arcade velvet">
+        <div className="arcade-head">
+          <button className="btn small felt-back" onClick={() => set({ panel: 'games' })}>← Khu giải trí</button>
+          <h2 className="neon">🎲 BẦU CUA TÔM CÁ</h2>
+          <span className="arcade-coins">💰 {fmt(coins)} xu</span>
+          <button className="icon-btn arcade-close" onClick={() => set({ panel: null })} aria-label="Đóng">✕</button>
         </div>
-        {result && st.phase === 'result' && (
-          <div className={`bc-result ${result.net > 0 ? 'win' : result.net < 0 ? 'lose' : ''}`}>
-            {result.net > 0 ? `+${fmt(result.net)} xu 🎉` : result.net < 0 ? `-${fmt(-result.net)} xu` : 'Hoà vốn'}
+
+        {/* Người đang ngồi ở bàn — cùng chơi một ván */}
+        {(st.seated?.length ?? 0) > 0 && (
+          <div className="bc-players">
+            {st.seated!.map((p) => (
+              <div key={p.id} className={`bc-player ${p.id === meId ? 'me' : ''}`} title={p.name}>
+                <div className="seat-ava"><AvatarPreview appearance={p.appearance} size={88} /></div>
+                <small>{p.id === meId ? 'Bạn' : p.name}</small>
+                {p.bet > 0 && <span className="pbet">{p.bet >= 1000 ? `${(p.bet / 1000).toFixed(p.bet % 1000 ? 1 : 0)}K` : p.bet}</span>}
+              </div>
+            ))}
           </div>
         )}
-      </div>
 
-      <div className="bc-board">
-        {BC_SYMBOLS.map((s, i) => {
-          const hitCount = hits.filter((d) => d === i).length;
-          return (
-            <button key={s.name} className={`bc-cell ${betting ? '' : 'disabled'} ${hitCount ? 'hit' : ''}`} style={{ background: s.color }} onClick={() => bet(i)}>
-              <span className="bc-icon">{s.icon}</span>
-              <span className="bc-name">{s.name}{hitCount > 1 ? ` x${hitCount}` : ''}</span>
-              <span className="bc-total">Tổng: {fmt(st.totals[i])}</span>
-              {myBets[i] > 0 && <span className="bc-mine">💰 {fmt(myBets[i])}</span>}
-            </button>
-          );
-        })}
-      </div>
+        <div className="bc-stage">
+          {/* Đồng hồ đếm ngược */}
+          <div className={`bc-timer ${st.phase}`}>
+            <svg viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="44" className="track" />
+              <circle cx="50" cy="50" r="44" className="bar" style={{ strokeDasharray: `${276.5 * ringPct} 276.5`, stroke: remain <= 5 ? '#ef476f' : '#ffd166' }} />
+            </svg>
+            <div className="bc-timer-text">
+              {betting ? <><b>{remain}</b><small>giây</small></> : st.phase === 'rolling' ? <><b>🎲</b><small>đang lắc</small></> : <><b>✨</b><small>kết quả</small></>}
+            </div>
+          </div>
 
-      <div className="bc-controls">
-        <div className="chips">
-          {chips.map((c) => (
-            <button key={c} className={`chip-btn c${c} ${chip === c ? 'active' : ''}`} disabled={c > coins} onClick={() => setChip(c)}>
-              {c >= 1000 ? `${c / 1000}K` : c}
-            </button>
-          ))}
+          {/* Đĩa + bát úp */}
+          <div className="bc-plate2">
+            <div className="dish">
+              {faces && faces.map((d, i) => (
+                <div key={i} className={`die ${st.phase === 'rolling' ? 'shake' : 'pop'}`} style={{ animationDelay: `${i * 0.08}s` }}>
+                  {BC_SYMBOLS[d].icon}
+                </div>
+              ))}
+            </div>
+            <div className={`bowl ${st.phase === 'result' ? 'lifted' : st.phase === 'rolling' ? 'shaking' : ''}`} />
+            <div className="bc-call">
+              {betting ? 'Đặt cược đi nào!' : st.phase === 'rolling' ? 'Lắc lắc lắc…' : result
+                ? (result.net > 0 ? <span className="win">🎉 Bạn thắng +{fmt(result.net)} xu</span>
+                  : result.net < 0 ? <span className="lose">Thua {fmt(-result.net)} xu</span> : 'Hoà vốn')
+                : 'Mở bát!'}
+            </div>
+          </div>
+
+          {/* Thống kê */}
+          <div className="bc-stats">
+            <div><span>👀</span><b>{st.viewers}</b><small>đang xem</small></div>
+            <div><span>🎯</span><b>{st.players}</b><small>người cược</small></div>
+            <div><span>💰</span><b>{fmt(pot)}</b><small>trên bàn</small></div>
+          </div>
         </div>
-        <div className="bc-mytotal">
-          Cược: <b>{fmt(myTotal)}</b>
-          {betting && myTotal > 0 && <button className="btn small" onClick={clear}>Rút cược</button>}
-        </div>
-      </div>
 
-      <div className="bc-history">
-        <span>Lịch sử:</span>
-        {st.history.slice(0, 8).map((h, i) => (
-          <span key={i} className="hist">{h.map((d) => BC_SYMBOLS[d].icon).join('')}</span>
-        ))}
+        <div className="bc-board2">
+          {BC_SYMBOLS.map((s, i) => {
+            const hitCount = hits.filter((d) => d === i).length;
+            return (
+              <button key={s.name} className={`bc-tile ${betting ? '' : 'disabled'} ${hitCount ? 'hit' : ''}`} onClick={() => bet(i)}>
+                {hitCount > 0 && <span className="hit-tag">×{hitCount}</span>}
+                <span className="medal">{s.icon}</span>
+                <span className="tile-label">{s.name}</span>
+                <span className="tile-pot">💰 {fmt(st.totals[i])}</span>
+                {myBets[i] > 0 && <span className="my-chip">{fmt(myBets[i])}</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="bc-bar">
+          <div className="chips">
+            {chips.map((c) => (
+              <button key={c} className={`chip-btn c${c} ${chip === c ? 'active' : ''}`} disabled={c > coins} onClick={() => setChip(c)}>
+                {c >= 1000 ? `${c / 1000}K` : c}
+              </button>
+            ))}
+          </div>
+          <div className="bc-mine-total">
+            <small>Bạn cược</small><b>{fmt(myTotal)}</b>
+            {betting && myTotal > 0 && <button className="tl-btn red small" onClick={clear}>Rút</button>}
+          </div>
+        </div>
+
+        <div className="bc-foot">
+          <div className="bc-hist">
+            {st.history.slice(0, 8).map((h, i) => (
+              <span key={i} className={`hist ${i === 0 ? 'latest' : ''}`}>{h.map((d) => BC_SYMBOLS[d].icon).join('')}</span>
+            ))}
+          </div>
+          <span className="rules-chip">Ra 1 mặt ăn 1 · 2 mặt ăn 2 · 3 mặt ăn 3</span>
+        </div>
+        {st.lastWinners.length > 0 && st.phase === 'result' && (
+          <div className="bc-winners2">🏆 {st.lastWinners.map((w) => `${w.name} +${fmt(w.win)}`).join(' · ')}</div>
+        )}
       </div>
-      {st.lastWinners.length > 0 && st.phase === 'result' && (
-        <div className="bc-winners">🏆 {st.lastWinners.map((w) => `${w.name} +${fmt(w.win)}`).join(' · ')}</div>
-      )}
-      <p className="hint">Mỗi con xuất hiện trên xúc xắc trả 1 lần tiền cược (xuất hiện 2 lần trả x2, 3 lần trả x3). Chỉ dùng xu ảo trong game.</p>
-    </Modal>
+    </div>
   );
 }
 

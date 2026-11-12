@@ -1,15 +1,16 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { CROPS, stealFloor } from '../../../shared/catalog';
-import { canWater, plotStage } from '../game/farmUtil';
+import { ANIMALS, CROPS, stealFloor } from '../../../shared/catalog';
+import { animalRemainMs, canWater, plotStage } from '../game/farmUtil';
 import { call, logout, send, travel } from '../net';
-import { fmt, get, Panel, set, useStore } from '../store';
-import { AvatarPreview, Coin, Modal } from './common';
+import { fmt, get, Panel, set, toast, useStore } from '../store';
+import { AvatarPreview, Coin, Modal, PanelBoundary } from './common';
 import { ShopPanel } from './ShopPanel';
 import { WardrobePanel } from './Wardrobe';
 import { FriendsPanel, InventoryPanel, PlayerCard } from './SocialPanels';
 import { BauCuaPanel } from './BauCuaPanel';
 import { TienLenPanel } from './TienLenPanel';
 import { GamesPanel } from './GamesPanel';
+import { MessengerPanel } from './MessengerPanel';
 import { BusStopPanel } from './BusStopPanel';
 import { audioPrefs, onAudioPrefs, toggleMusic, toggleSfx } from '../sound';
 
@@ -29,15 +30,18 @@ export function HUD() {
       )}
       <Toasts />
       <ConnectionBanner />
+      <PanelBoundary key={panel ?? 'none'} onClose={() => set({ panel: null })}>
       {panel === 'shop' && <ShopPanel />}
       {panel === 'wardrobe' && <WardrobePanel />}
       {panel === 'inventory' && <InventoryPanel />}
       {panel === 'friends' && <FriendsPanel />}
+      {panel === 'messages' && <MessengerPanel />}
       {panel === 'map' && <BusStopPanel title="🗺️ Bản đồ Xóm Vui" />}
       {panel === 'games' && <GamesPanel />}
       {panel === 'bus' && <BusStopPanel />}
       {panel === 'baucua' && <BauCuaPanel />}
       {panel === 'tienlen' && <TienLenPanel />}
+      </PanelBoundary>
       {playerCard != null && <PlayerCard />}
       <ConfirmBox />
     </div>
@@ -59,6 +63,11 @@ function VisitBar() {
       if (!pl.stolenBy.includes(meId) && pl.yieldLeft > stealFloor(c.yield)) steal++;
     } else if (canWater(pl)) water++;
   }
+  // Chuồng: sản phẩm vật nuôi lấy trộm được
+  for (const an of farm?.animals ?? []) {
+    const def = ANIMALS[an.type];
+    if (animalRemainMs(an) === 0 && !(an.stolenBy ?? []).includes(meId) && (an.left ?? def.qty) > stealFloor(def.qty)) steal++;
+  }
   return (
     <div className="farm-visit">
       <span className="visit-title">👀 Đang thăm nông trại của <b>{zone.ownerName}</b></span>
@@ -75,18 +84,20 @@ function TopBar() {
   const pct = Math.min(100, (me.xp / me.xpNext) * 100);
   return (
     <div className="topbar">
-      <div className="me-card" onClick={() => set({ panel: 'wardrobe' })}>
-        <div className="me-avatar"><AvatarPreview appearance={me.appearance} size={58} /></div>
-        <div>
+      <div className="me-card" title="Bấm để thay đồ" onClick={() => set({ panel: 'wardrobe' })}>
+        <div className="me-ava-wrap">
+          <div className="me-avatar"><AvatarPreview appearance={me.appearance} size={58} /></div>
+          <span className="me-lv" title={`Cấp ${me.level}`}>{me.level}</span>
+        </div>
+        <div className="me-info">
           <div className="me-name">{me.name}</div>
-          <div className="xp"><div className="xp-fill" style={{ width: `${pct}%` }} /><span>Lv{me.level} · {me.xp}/{me.xpNext}</span></div>
+          <div className="xp"><div className="xp-fill" style={{ width: `${pct}%` }} /><span>{me.xp}/{me.xpNext} XP</span></div>
         </div>
       </div>
       <div className="top-right">
         {zone && <div className="zone-name">📍 {zone.name}</div>}
         <CoinWithDelta n={me.coins} />
-        <AudioToggles />
-        <button className="icon-btn light" title="Đăng xuất" onClick={logout}>⎋</button>
+        <SettingsMenu />
       </div>
     </div>
   );
@@ -118,19 +129,54 @@ function CoinWithDelta({ n }: { n: number }) {
   );
 }
 
-function AudioToggles() {
+/**
+ * Bật toàn màn hình rồi khoá hướng ngang (Android Chrome hỗ trợ; iPhone Safari không cho khoá hướng).
+ * Phải gọi từ một cú bấm của người dùng.
+ */
+async function fullscreenLandscape() {
+  const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => Promise<void> };
+  try {
+    if (!document.fullscreenElement) await (el.requestFullscreen?.() ?? el.webkitRequestFullscreen?.());
+  } catch { /* trình duyệt không cho toàn màn hình */ }
+  const orientation = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+  try {
+    if (!orientation?.lock) throw new Error('unsupported');
+    await orientation.lock('landscape');
+  } catch {
+    toast('Máy không cho tự xoay ngang: hãy tắt khoá xoay màn hình rồi xoay ngang điện thoại', 'info');
+  }
+}
+
+/** Nút ⚙️: gom nhạc nền, âm thanh và đăng xuất vào một menu nhỏ. */
+function SettingsMenu() {
+  const [open, setOpen] = useState(false);
   const [, force] = useState(0);
+  const ref = useRef<HTMLDivElement>(null);
   useEffect(() => onAudioPrefs(() => force((x) => x + 1)), []);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    window.addEventListener('pointerdown', h);
+    return () => window.removeEventListener('pointerdown', h);
+  }, [open]);
   return (
-    <>
-      <button className="icon-btn light" title={audioPrefs.music ? 'Tắt nhạc' : 'Bật nhạc'} onClick={toggleMusic}>{audioPrefs.music ? '🎵' : '🔇'}</button>
-      <button className="icon-btn light" title={audioPrefs.sfx ? 'Tắt âm thanh' : 'Bật âm thanh'} onClick={toggleSfx}>{audioPrefs.sfx ? '🔊' : '🔈'}</button>
-    </>
+    <div className="settings" ref={ref}>
+      <button className="icon-btn light" title="Cài đặt" aria-expanded={open} onClick={() => setOpen(!open)}>⚙️</button>
+      {open && (
+        <div className="settings-pop">
+          <button onClick={toggleMusic}><span>{audioPrefs.music ? '🎵' : '🔇'}</span>Nhạc nền<b>{audioPrefs.music ? 'Bật' : 'Tắt'}</b></button>
+          <button onClick={toggleSfx}><span>{audioPrefs.sfx ? '🔊' : '🔈'}</span>Âm thanh<b>{audioPrefs.sfx ? 'Bật' : 'Tắt'}</b></button>
+          <button onClick={() => { setOpen(false); void fullscreenLandscape(); }}><span>📱</span>Toàn màn hình + xoay ngang</button>
+          <button className="danger" onClick={logout}><span>⎋</span>Đăng xuất</button>
+        </div>
+      )}
+    </div>
   );
 }
 
 function MenuButtons() {
   const incoming = useStore((s) => s.friends.incoming.length);
+  const unreadTotal = useStore((s) => Object.values(s.unread).reduce((a, b) => a + b, 0));
   const [expanded, setExpanded] = useState(false);
   const zone = useStore((s) => s.zone);
   const meId = useStore((s) => s.me?.id);
@@ -143,14 +189,15 @@ function MenuButtons() {
       ? [['shop', '🌱', 'Cửa hàng', '#80c35a'] as [Panel, string, string, string]]
       : [['farm', '🏡', 'Về nông trại', '#80c35a'] as ['farm', string, string, string]]),
     ['inventory', '🎒', 'Túi đồ', '#ff9f43'],
-    ['wardrobe', '👗', 'Thay đồ', '#ff7eb6'],
+    ['messages', '💬', 'Tin nhắn', '#38bdf8'],
     ['friends', '👥', 'Bạn bè', '#a78bfa'],
   ];
+  const badgeOf = (k: Panel | 'farm') => (k === 'friends' ? incoming : k === 'messages' ? unreadTotal : 0);
   return (
     <div className={`world-menu ${expanded ? 'expanded' : ''}`}>
       <button className="menu-toggle" aria-label="Menu trò chơi" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
         <span aria-hidden="true">{expanded ? '✕' : '☰'}</span>
-        {incoming > 0 && !expanded && <span className="badge">{incoming}</span>}
+        {incoming + unreadTotal > 0 && !expanded && <span className="badge">{incoming + unreadTotal}</span>}
       </button>
       <div className="menu-buttons">
       {btns.map(([k, icon, label, color]) => (
@@ -161,7 +208,7 @@ function MenuButtons() {
         }}>
           <span className="menu-icon">{icon}</span>
           <span className="menu-label">{label}</span>
-          {k === 'friends' && incoming > 0 && <span className="badge">{incoming}</span>}
+          {badgeOf(k) > 0 && <span className="badge">{badgeOf(k)}</span>}
         </button>
       ))}
       </div>
@@ -171,21 +218,18 @@ function MenuButtons() {
 
 function ChatBox() {
   const chat = useStore((s) => s.chat);
-  const pmTarget = useStore((s) => s.pmTarget);
   const [text, setText] = useState('');
   const [open, setOpen] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { logRef.current?.scrollTo(0, logRef.current.scrollHeight); }, [chat, open]);
-  useEffect(() => { if (pmTarget) { setOpen(true); setTimeout(() => inputRef.current?.focus(), 50); } }, [pmTarget]);
 
   function submit(e: FormEvent) {
     e.preventDefault();
     const t = text.trim();
     if (!t) return;
-    if (pmTarget) call('pm', { to: pmTarget.id, text: t });
-    else send('chat', { text: t });
+    send('chat', { text: t });
     setText('');
   }
 
@@ -194,7 +238,7 @@ function ChatBox() {
 
   return (
     <div className={`chatbox ${open ? 'open' : 'closed'}`}>
-      <button className="chat-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? '▾ Thu gọn' : '💬 Trò chuyện'}</button>
+      <button className="chat-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? '▾ Thu gọn' : '💬 Chat cộng đồng'}</button>
       {open && (
         <>
           <div className="chat-log" ref={logRef}>
@@ -210,9 +254,8 @@ function ChatBox() {
             </div>
           )}
           <form className="chat-input" onSubmit={submit}>
-            {pmTarget && <span className="pm-chip" onClick={() => set({ pmTarget: null })} title="Bỏ nhắn riêng">→ {pmTarget.name} ✕</span>}
             <button type="button" className="emo-btn" onClick={() => setShowEmo(!showEmo)}>😊</button>
-            <input ref={inputRef} value={text} maxLength={120} onChange={(e) => setText(e.target.value)} placeholder={pmTarget ? 'Nhắn riêng...' : 'Nói gì đó...'}
+            <input ref={inputRef} value={text} maxLength={120} onChange={(e) => setText(e.target.value)} placeholder="Nói gì đó với mọi người..."
               onKeyDown={(e) => { if (e.key === 'Escape') (e.target as HTMLInputElement).blur(); }} />
             <button className="btn small primary">Gửi</button>
           </form>

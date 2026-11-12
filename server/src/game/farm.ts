@@ -27,6 +27,8 @@ export function farmPayload(farm: Farm) {
       type: a.type,
       fedAt: a.fedAt,
       produceMs: ANIMALS[a.type].produceSec * 1000,
+      left: a.left ?? ANIMALS[a.type].qty,
+      stolenBy: a.stolenBy ?? [],
     })),
   };
 }
@@ -156,6 +158,41 @@ export function registerFarm(socket: Socket, p: OnlinePlayer) {
     return { item: out.item };
   });
 
+  // Trộm sản phẩm vật nuôi (trứng, sữa, len) ở nông trại người khác
+  handle<{ owner: number; idx: number }>(socket, 'farm:stealAnimal', async ({ owner, idx }) => {
+    const ownerId = Number(owner);
+    if (ownerId === uid) throw new GameError('Đây là nông trại của bạn');
+    const out = await withFarm(ownerId, async (farm) => {
+      const an = farm.animals[Number(idx)];
+      if (!an) throw new GameError('Không tìm thấy vật nuôi');
+      const def = ANIMALS[an.type];
+      if (an.fedAt == null || Date.now() < an.fedAt + def.produceSec * 1000) throw new GameError('Chưa có gì để lấy');
+      const left = an.left ?? def.qty;
+      const stolenBy = an.stolenBy ?? [];
+      if (stolenBy.includes(uid)) throw new GameError('Bạn đã lấy lứa này rồi');
+      if (left <= stealFloor(def.qty)) throw new GameError('Chủ chuồng đã đề phòng, không lấy được nữa');
+      an.stolenBy = [...stolenBy, uid];
+      if (farm.dog && Math.random() < DOG_CATCH_CHANCE) {
+        const fine = Math.min(DOG_FINE, (await getProfile(uid)).coins);
+        if (fine > 0) { await addCoins(uid, -fine); await addCoins(ownerId, fine); }
+        return { caught: true as const, fine, item: '' };
+      }
+      an.left = left - 1;
+      await addItem(uid, def.product, 1);
+      return { caught: false as const, fine: 0, item: def.product };
+    });
+    if (out.caught) {
+      getIo().to(`z:farm:${ownerId}`).emit('farm:dogchase', { thiefId: uid, animal: Number(idx) });
+      toast(ownerId, `🐕 Chó nhà bạn vừa đuổi ${p.name} khi đang trộm ở chuồng! +${out.fine} xu tiền phạt`, 'success');
+      await Promise.all([pushMe(uid), pushMe(ownerId)]);
+      return { caught: true, fine: out.fine };
+    }
+    toast(ownerId, `😈 ${p.name} vừa lấy trộm ${ITEMS[out.item].name} trong chuồng nhà bạn!`, 'error');
+    levelUpNotice(uid, await addXp(uid, 1));
+    await pushMe(uid);
+    return { item: out.item };
+  });
+
   handle(socket, 'farm:buyDog', async () => {
     await requireLevel(uid, DOG_LEVEL);
     await withFarm(uid, async (farm) => {
@@ -194,6 +231,8 @@ export function registerFarm(socket: Socket, p: OnlinePlayer) {
       if (an.fedAt != null) throw new GameError('Vật nuôi đã no');
       await removeItem(uid, 'feed', ANIMALS[an.type].feed);
       an.fedAt = Date.now();
+      an.left = ANIMALS[an.type].qty; // lứa mới: đủ số, chưa ai trộm
+      an.stolenBy = [];
     });
     await pushMe(uid);
   });
@@ -204,9 +243,12 @@ export function registerFarm(socket: Socket, p: OnlinePlayer) {
       if (!an) throw new GameError('Không tìm thấy vật nuôi');
       const def = ANIMALS[an.type];
       if (an.fedAt == null || Date.now() < an.fedAt + def.produceSec * 1000) throw new GameError('Chưa có sản phẩm');
-      await addItem(uid, def.product, def.qty);
+      const qty = an.left ?? def.qty; // phần còn lại sau khi bị trộm
+      await addItem(uid, def.product, qty);
       an.fedAt = null;
-      return { item: def.product, qty: def.qty, xp: def.xp };
+      an.left = undefined;
+      an.stolenBy = [];
+      return { item: def.product, qty, xp: def.xp };
     });
     levelUpNotice(uid, await addXp(uid, res.xp));
     await pushMe(uid);

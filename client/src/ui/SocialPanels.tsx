@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Appearance } from '../../../shared/catalog';
 import { ITEMS } from '../../../shared/catalog';
 import { call, travel } from '../net';
-import { confirmBox, set, toast, useStore } from '../store';
+import { confirmBox, openChat, set, toast, useStore } from '../store';
 import { AvatarPreview, Modal } from './common';
 
 const ZONE_NAMES: Record<string, string> = { park: 'Công viên', fun: 'Khu vui chơi' };
@@ -19,6 +19,7 @@ export function goFarm(userId: number) {
 
 export function FriendsPanel() {
   const { friends, incoming } = useStore((s) => s.friends);
+  const unread = useStore((s) => s.unread);
   const [name, setName] = useState('');
 
   useEffect(() => { call('friend:list').then((r) => r.ok && set({ friends: { friends: r.friends, incoming: r.incoming } })); }, []);
@@ -54,7 +55,7 @@ export function FriendsPanel() {
           <span className={`dot ${f.online ? 'on' : ''}`} />
           <span className="friend-name">{f.name} <small>Lv{f.level} {f.online ? `· ${zoneLabel(f.zone)}` : '· offline'}</small></span>
           <button className="btn small" title="Thăm nông trại" onClick={() => goFarm(f.id)}>🌾 Thăm vườn</button>
-          {f.online && <button className="btn small" title="Nhắn tin" onClick={() => { set({ pmTarget: { id: f.id, name: f.name }, panel: null }); }}>💬</button>}
+          <button className="btn small" title="Nhắn tin" onClick={() => openChat(f.id, f.name)}>💬{unread[f.id] ? ` ${unread[f.id]}` : ''}</button>
           <button className="btn small danger" title="Huỷ kết bạn" onClick={() => confirmBox(`Huỷ kết bạn với ${f.name}?`, () => call('friend:remove', { userId: f.id }))}>✕</button>
         </div>
       ))}
@@ -89,7 +90,7 @@ export function PlayerCard() {
                 if (r.ok) { toast(r.accepted ? 'Đã trở thành bạn bè 🤝' : 'Đã gửi lời mời 💌', 'success'); setP({ ...p, friend: r.accepted ? 'accepted' : 'pending' }); }
               }}>➕ Kết bạn</button>}
             <button className="btn" onClick={() => goFarm(p.id)}>🌾 Thăm nông trại</button>
-            <button className="btn" onClick={() => { set({ pmTarget: { id: p.id, name: p.name } }); close(); }}>💬 Nhắn riêng</button>
+            <button className="btn" onClick={() => (p.friend === 'accepted' ? openChat(p.id, p.name) : toast('Kết bạn trước để nhắn tin riêng nhé'))}>💬 Nhắn riêng</button>
           </div>
         </div>
       </div>

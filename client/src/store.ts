@@ -19,7 +19,7 @@ export interface PlotData {
   crop: string | null; plantedAt: number; bonus: number; growMs: number;
   waterStage: number; yieldLeft: number; stolenBy: number[];
 }
-export interface AnimalData { type: string; fedAt: number | null; produceMs: number }
+export interface AnimalData { type: string; fedAt: number | null; produceMs: number; left?: number; stolenBy?: number[] }
 export interface FarmData { now: number; plots: PlotData[]; animals: AnimalData[]; dog?: boolean }
 
 export interface ZoneInfo {
@@ -31,7 +31,9 @@ export interface ChatMsg { id: number; kind: 'chat' | 'system' | 'pm'; name?: st
 export interface Toast { id: number; msg: string; kind: 'info' | 'success' | 'error' }
 export interface FriendRow { id: number; name: string; level: number; online?: boolean; zone?: string | null }
 
-export type Panel = null | 'shop' | 'inventory' | 'wardrobe' | 'friends' | 'map' | 'games' | 'baucua' | 'tienlen' | 'bus';
+export type Panel = null | 'shop' | 'inventory' | 'wardrobe' | 'friends' | 'messages' | 'map' | 'games' | 'baucua' | 'tienlen' | 'bus';
+
+export interface ChatMessage { id: number; from: number; to: number; text: string; at: number; read: boolean; fromName?: string }
 
 interface State {
   token: string | null;
@@ -49,7 +51,12 @@ interface State {
   farmTool: string;
   confirm: { text: string; onYes: () => void } | null;
   friends: { friends: FriendRow[]; incoming: FriendRow[] };
-  pmTarget: { id: number; name: string } | null;
+  /** Đang mở trò chuyện riêng với ai (trong bảng Tin nhắn). */
+  chatWith: { id: number; name: string } | null;
+  /** Lịch sử tin nhắn đã tải theo từng người bạn. */
+  chats: Record<number, ChatMessage[]>;
+  /** Số tin chưa đọc theo từng người bạn. */
+  unread: Record<number, number>;
   /** Đang đi xe buýt giữa các khu. */
   traveling: boolean;
 }
@@ -70,7 +77,9 @@ export const useStore = create<State>(() => ({
   farmTool: 'auto',
   confirm: null,
   friends: { friends: [], incoming: [] },
-  pmTarget: null,
+  chatWith: null,
+  chats: {},
+  unread: {},
   traveling: false,
 }));
 
@@ -102,4 +111,9 @@ export function serverNow() {
 
 export function fmt(n: number) {
   return n.toLocaleString('vi-VN');
+}
+
+/** Mở bảng Tin nhắn, trò chuyện với một người bạn. */
+export function openChat(id: number, name: string) {
+  set({ panel: 'messages', chatWith: { id, name }, playerCard: null });
 }

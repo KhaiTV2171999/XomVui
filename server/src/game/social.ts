@@ -1,6 +1,7 @@
 import type { Socket } from 'socket.io';
 import {
-  deleteFriend, findProfileByName, friendStatus, GameError, getProfile, listFriends, listIncoming, setFriend, tx,
+  addMessage, deleteFriend, findProfileByName, friendStatus, GameError, getConversation, getProfile, lastMessages,
+  listFriends, listIncoming, markRead, setFriend, tx, unreadCounts,
 } from '../db';
 import { handle, online, OnlinePlayer, toast } from './online';
 
@@ -76,13 +77,47 @@ export function registerSocial(socket: Socket, p: OnlinePlayer) {
     };
   });
 
-  handle<{ to: number; text: string }>(socket, 'pm', ({ to, text }) => {
-    const target = online.get(Number(to));
-    if (!target) throw new GameError('Người này đang offline');
-    const t = String(text ?? '').trim().slice(0, 200);
-    if (!t) return;
-    const msg = { from: uid, fromName: p.name, to: target.userId, toName: target.name, text: t };
-    target.socket.emit('pm', msg);
+  // ---- Tin nhắn riêng (lưu trong DB, gửi được cả khi bạn offline) ----
+  let lastPm = 0;
+  const requireFriend = async (other: number) => {
+    if ((await friendStatus(uid, other)) !== 'accepted') throw new GameError('Chỉ nhắn tin được với bạn bè');
+  };
+
+  handle<{ to: number; text: string }>(socket, 'pm', async ({ to, text }) => {
+    const other = Number(to);
+    const t = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (!t) throw new GameError('Tin nhắn trống');
+    const now = Date.now();
+    if (now - lastPm < 400) throw new GameError('Bạn gửi nhanh quá!');
+    lastPm = now;
+    await requireFriend(other);
+    const msg = { ...(await addMessage(uid, other, t)), fromName: p.name };
+    online.get(other)?.socket.emit('pm', msg);
     socket.emit('pm', msg);
+    return { message: msg };
   });
+
+  handle<{ with: number; before?: number }>(socket, 'pm:history', async ({ with: other, before }) => {
+    const o = Number(other);
+    await requireFriend(o);
+    const messages = await getConversation(uid, o, before != null ? Number(before) : undefined);
+    if (before == null) {
+      await markRead(uid, o);
+      await pushUnread(uid);
+    }
+    return { messages };
+  });
+
+  handle<{ with: number }>(socket, 'pm:read', async ({ with: other }) => {
+    await markRead(uid, Number(other));
+    await pushUnread(uid);
+  });
+
+  handle(socket, 'pm:overview', async () => ({ last: await lastMessages(uid) }));
+}
+
+/** Gửi số tin chưa đọc (theo từng người) cho người chơi. */
+export async function pushUnread(uid: number) {
+  const s = online.get(uid)?.socket;
+  if (s) s.emit('pm:unread', { counts: await unreadCounts(uid) });
 }

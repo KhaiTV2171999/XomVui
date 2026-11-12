@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef } from 'react';
+import { Component, ReactNode, useEffect, useRef } from 'react';
 import type { Appearance } from '../../../shared/catalog';
 import { AV_H, AV_W, drawAvatar } from '../avatar/draw';
 
@@ -47,6 +47,22 @@ export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: [T, st
       ))}
     </div>
   );
+}
+
+/** Bắt lỗi của một bảng: bảng đó hiện thông báo, phần còn lại của game vẫn chạy. */
+export class PanelBoundary extends Component<{ children: ReactNode; onClose: () => void }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) { console.error('[panel]', error); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <Modal title="⚠️ Có lỗi" onClose={this.props.onClose}>
+        <p>Bảng này gặp lỗi và đã được đóng an toàn. Hãy tải lại trang (F5) rồi thử lại.</p>
+        <p className="hint">{this.state.error.message}</p>
+      </Modal>
+    );
+  }
 }
 
 export function Coin({ n }: { n: number }) {

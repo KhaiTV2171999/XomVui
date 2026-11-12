@@ -11,7 +11,9 @@ pg.types.setTypeParser(20, (v) => Number(v)); // BIGINT → number
 export const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL ?? 'postgres://xomvui:xomvui@localhost:5434/xomvui',
   max: 10,
-  ssl: process.env.DATABASE_SSL === '1' ? { rejectUnauthorized: false } : undefined,
+  // Neon / Postgres trên cloud cần SSL: tự bật khi URL có sslmode hoặc là neon.tech
+  ssl: process.env.DATABASE_SSL === '1' || /sslmode=|neon\.tech/.test(process.env.DATABASE_URL ?? '')
+    ? { rejectUnauthorized: false } : undefined,
 });
 
 /** Transaction hiện tại (nếu có) — mọi truy vấn bên trong tx() tự dùng chung kết nối này. */
@@ -83,6 +85,16 @@ CREATE TABLE IF NOT EXISTS friends (
   created_at BIGINT NOT NULL,
   PRIMARY KEY (user_id, friend_id)
 );
+CREATE TABLE IF NOT EXISTS messages (
+  id BIGSERIAL PRIMARY KEY,
+  from_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  to_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  created_at BIGINT NOT NULL,
+  read_at BIGINT
+);
+CREATE INDEX IF NOT EXISTS messages_pair ON messages (LEAST(from_id, to_id), GREATEST(from_id, to_id), id);
+CREATE INDEX IF NOT EXISTS messages_unread ON messages (to_id) WHERE read_at IS NULL;
 `;
 
 /** Tạo bảng nếu chưa có. Gọi một lần khi server khởi động. */
@@ -111,7 +123,14 @@ export interface Plot {
   yieldLeft: number;
   stolenBy: number[];
 }
-export interface Animal { type: string; fedAt: number | null }
+export interface Animal {
+  type: string;
+  fedAt: number | null;
+  /** Số sản phẩm còn lại của lứa hiện tại (bị trộm thì giảm). Không có = đủ số. */
+  left?: number;
+  /** Ai đã trộm lứa này */
+  stolenBy?: number[];
+}
 export interface Farm { plots: Plot[]; animals: Animal[]; /** Có chó giữ nhà */ dog?: boolean }
 
 export const emptyPlot = (): Plot => ({ crop: null, plantedAt: 0, bonus: 0, waterStage: -1, yieldLeft: 0, stolenBy: [] });
@@ -270,4 +289,51 @@ export async function listFriends(userId: number) {
 export async function listIncoming(userId: number) {
   return all<{ id: number; name: string; level: number }>(`SELECT p.user_id AS id, p.name, p.level FROM friends f
     JOIN profiles p ON p.user_id = f.user_id WHERE f.friend_id = $1 AND f.status = 'pending'`, [userId]);
+}
+
+// ------------------------------------------------------------ Tin nhắn riêng
+
+export interface ChatMessage { id: number; from: number; to: number; text: string; at: number; read: boolean }
+
+const rowToMsg = (r: any): ChatMessage => ({
+  id: r.id, from: r.from_id, to: r.to_id, text: r.text, at: r.created_at, read: r.read_at != null,
+});
+
+export async function addMessage(from: number, to: number, text: string): Promise<ChatMessage> {
+  return rowToMsg(await one(
+    'INSERT INTO messages (from_id, to_id, text, created_at) VALUES ($1, $2, $3, $4) RETURNING *', [from, to, text, Date.now()],
+  ));
+}
+
+/** Lịch sử trò chuyện giữa a và b (mới nhất ở cuối), `before` để tải thêm tin cũ hơn. */
+export async function getConversation(a: number, b: number, before?: number, limit = 40): Promise<ChatMessage[]> {
+  const rows = await all(
+    `SELECT * FROM messages
+     WHERE LEAST(from_id, to_id) = LEAST($1::int, $2::int) AND GREATEST(from_id, to_id) = GREATEST($1::int, $2::int)
+       AND ($3::bigint IS NULL OR id < $3::bigint)
+     ORDER BY id DESC LIMIT $4`, [a, b, before ?? null, limit],
+  );
+  return rows.reverse().map(rowToMsg);
+}
+
+/** Đánh dấu đã đọc mọi tin `other` gửi cho `me`. */
+export async function markRead(me: number, other: number) {
+  await all('UPDATE messages SET read_at = $3 WHERE to_id = $1 AND from_id = $2 AND read_at IS NULL', [me, other, Date.now()]);
+}
+
+/** Số tin chưa đọc theo từng người gửi. */
+export async function unreadCounts(me: number): Promise<Record<number, number>> {
+  const rows = await all<{ from_id: number; n: number }>(
+    'SELECT from_id, COUNT(*)::int AS n FROM messages WHERE to_id = $1 AND read_at IS NULL GROUP BY from_id', [me],
+  );
+  return Object.fromEntries(rows.map((r) => [r.from_id, r.n]));
+}
+
+/** Tin nhắn gần nhất với từng người (để hiển thị trong danh sách). */
+export async function lastMessages(me: number): Promise<Record<number, ChatMessage>> {
+  const rows = await all(
+    `SELECT DISTINCT ON (other) *, CASE WHEN from_id = $1 THEN to_id ELSE from_id END AS other
+     FROM messages WHERE from_id = $1 OR to_id = $1 ORDER BY other, id DESC`, [me],
+  );
+  return Object.fromEntries(rows.map((r) => [r.other, rowToMsg(r)]));
 }

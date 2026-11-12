@@ -1,7 +1,8 @@
 import { SERVER_URL } from './config';
 import { io, Socket } from 'socket.io-client';
 import { addChat, get, set, toast } from './store';
-import type { FarmData, Me, PlayerPub, ZoneInfo } from './store';
+import type { ChatMessage, FarmData, Me, PlayerPub, ZoneInfo } from './store';
+import { sfx } from './sound';
 import type { Appearance } from '../../shared/catalog';
 
 type Handler = (data: any) => void;
@@ -27,7 +28,15 @@ export function connect(token: string) {
   const opts = { auth: { token }, transports: ['websocket', 'polling'] };
   socket = SERVER_URL ? io(SERVER_URL, opts) : io(opts);
 
-  socket.on('connect', () => set({ connected: true }));
+  socket.on('connect', () => {
+    set({ connected: true });
+    // Tải vài tin chat cộng đồng gần nhất nếu khung chat chưa có tin nào
+    if (!get().chat.some((m) => m.kind === 'chat')) {
+      call('chat:history', {}, { silent: true }).then((r) => {
+        if (r.ok) for (const m of r.messages as { name: string; text: string }[]) addChat({ kind: 'chat', name: m.name, text: m.text });
+      });
+    }
+  });
   socket.on('disconnect', () => set({ connected: false }));
   socket.on('connect_error', (err) => {
     if (err.message === 'unauthorized') logout();
@@ -55,10 +64,23 @@ export function connect(token: string) {
     addChat({ kind: 'chat', name: d.name, text: d.text });
     bus.emit('chat', d);
   });
-  socket.on('pm', (d: { from: number; fromName: string; toName: string; text: string }) => {
-    const mine = d.from === get().me?.id;
-    addChat({ kind: 'pm', name: mine ? `Bạn → ${d.toName}` : `${d.fromName} → Bạn`, text: d.text });
+  socket.on('pm', (m: ChatMessage) => {
+    const meId = get().me?.id;
+    const other = m.from === meId ? m.to : m.from;
+    // Chỉ nối vào lịch sử nếu đã tải cuộc trò chuyện này (tránh lịch sử bị thiếu đoạn giữa).
+    set((s) => (s.chats[other] && !s.chats[other].some((x) => x.id === m.id)
+      ? { chats: { ...s.chats, [other]: [...s.chats[other], m] } } : {}));
+    if (m.from === meId) return;
+    const { panel, chatWith } = get();
+    if (panel === 'messages' && chatWith?.id === other) {
+      send('pm:read', { with: other });
+    } else {
+      set((s) => ({ unread: { ...s.unread, [other]: (s.unread[other] ?? 0) + 1 } }));
+      toast(`💬 ${m.fromName ?? 'Bạn bè'}: ${m.text.length > 60 ? m.text.slice(0, 60) + '…' : m.text}`);
+    }
+    sfx('ding');
   });
+  socket.on('pm:unread', ({ counts }: { counts: Record<number, number> }) => set({ unread: counts }));
   socket.on('farm:update', ({ ownerId, farm }: { ownerId: number; farm: FarmData }) => {
     if (get().zone?.ownerId !== ownerId) return;
     set({ farm, timeOffset: farm.now - Date.now() });

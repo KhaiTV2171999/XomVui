@@ -6,13 +6,13 @@ import path from 'node:path';
 import { Server } from 'socket.io';
 import { DAILY_BONUS } from '../../shared/catalog';
 import { addCoins, claimDaily, createSession, createUser, findUser, getProfile, initDb, Profile, userIdFromToken } from './db';
-import { online, OnlinePlayer, pushMe, setIo, toast, vnDay } from './game/online';
+import { handle, online, OnlinePlayer, pushMe, setIo, toast, vnDay } from './game/online';
 import { joinZone, leaveZone, registerWorld } from './game/world';
 import { registerFarm } from './game/farm';
 import { registerShop } from './game/shop';
-import { notifyFriendsPresence, pushFriends, registerSocial } from './game/social';
-import { registerBauCua, startBauCua } from './game/baucua';
-import { onDisconnectTienLen, registerTienLen } from './game/tienlen';
+import { notifyFriendsPresence, pushFriends, pushUnread, registerSocial } from './game/social';
+import { bcOverview, registerBauCua, startBauCua } from './game/baucua';
+import { onDisconnectTienLen, registerTienLen, tlOverview } from './game/tienlen';
 
 const PORT = Number(process.env.PORT) || 3001;
 const app = express();
@@ -127,6 +127,8 @@ io.on('connection', (socket) => {
   registerSocial(socket, p);
   registerBauCua(socket, p);
   registerTienLen(socket, p);
+  // Sảnh Khu giải trí: tình hình trực tiếp các trò
+  handle(socket, 'games:overview', () => ({ now: Date.now(), baucua: bcOverview(), tienlen: tlOverview() }));
 
   socket.on('disconnect', () => {
     if (online.get(uid)?.socket !== socket) return; // đã bị thay bởi kết nối mới
@@ -144,6 +146,7 @@ io.on('connection', (socket) => {
     }
     await pushMe(uid);
     await pushFriends(uid);
+    await pushUnread(uid);
     await notifyFriendsPresence(uid);
     if (prof.created) await joinZone(p, 'myfarm', 'login');
   })().catch((e) => console.error('[connect]', e));

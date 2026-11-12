@@ -389,3 +389,13 @@ export function registerTienLen(socket: Socket, p: OnlinePlayer) {
     doPass(t, idx);
   });
 }
+
+/** Tóm tắt cho sảnh Khu giải trí. */
+export function tlOverview() {
+  const list = [...tables.values()];
+  return {
+    tables: list.length,
+    playing: list.filter((t) => t.playing).length,
+    players: list.reduce((n, t) => n + t.seats.filter((s) => s?.kind === 'human').length, 0),
+  };
+}
