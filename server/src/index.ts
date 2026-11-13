@@ -4,10 +4,11 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Server } from 'socket.io';
-import { DAILY_BONUS } from '../../shared/catalog';
+import { ECON } from '../../shared/catalog';
 import { addCoins, claimDaily, createSession, createUser, findUser, getProfile, initDb, Profile, userIdFromToken } from './db';
 import { handle, online, OnlinePlayer, pushMe, setIo, toast, vnDay } from './game/online';
 import { joinZone, leaveZone, registerWorld } from './game/world';
+import { currentCatalog, initCatalog } from './game/catalog';
 import { registerFarm } from './game/farm';
 import { registerShop } from './game/shop';
 import { notifyFriendsPresence, pushFriends, pushUnread, registerSocial } from './game/social';
@@ -120,6 +121,8 @@ io.on('connection', (socket) => {
     socket, zone: null, x: 0, y: 0, lastChat: 0,
   };
   online.set(uid, p);
+  // Bảng giá nông trại hiện tại (lưu trong DB) — gửi trước mọi dữ liệu khác
+  socket.emit('catalog', currentCatalog());
 
   registerWorld(socket, p);
   registerFarm(socket, p);
@@ -141,8 +144,8 @@ io.on('connection', (socket) => {
   (async () => {
     // Quà đăng nhập: claimDaily chỉ trả true lần đầu trong ngày (an toàn khi mở nhiều tab).
     if (await claimDaily(uid, vnDay())) {
-      await addCoins(uid, DAILY_BONUS);
-      setTimeout(() => toast(uid, `🎁 Quà đăng nhập hằng ngày: +${DAILY_BONUS} xu`, 'success'), 800);
+      await addCoins(uid, ECON.dailyBonus);
+      setTimeout(() => toast(uid, `🎁 Quà đăng nhập hằng ngày: +${ECON.dailyBonus} xu`, 'success'), 800);
     }
     await pushMe(uid);
     await pushFriends(uid);
@@ -163,6 +166,7 @@ server.on('error', (err: NodeJS.ErrnoException) => {
 
 // Khởi tạo database rồi mới mở cổng.
 initDb()
+  .then(() => initCatalog())
   .then(() => {
     startBauCua();
     server.listen(PORT, () => console.log(`🏡 Xóm Vui server chạy tại http://localhost:${PORT}`));

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { GameChatButton } from './GameChat';
+import { memo, useEffect, useRef, useState } from 'react';
 import { bus, call, send } from '../net';
 import { fmt, set, toast, useStore } from '../store';
 import { AvatarPreview, Modal } from './common';
@@ -29,10 +30,9 @@ export function BauCuaPanel() {
   const [chips, setChips] = useState<number[]>([10, 50, 100, 500, 1000, 5000]);
   const [chip, setChip] = useState(100);
   const [offset, setOffset] = useState(0);
-  const [now, setNow] = useState(Date.now());
-  const [rollFaces, setRollFaces] = useState([0, 1, 2]);
   const [result, setResult] = useState<{ win: number; net: number } | null>(null);
   const roundRef = useRef(0);
+  const pendingRef = useRef(0);
 
   useEffect(() => {
     const apply = (s: BcState) => {
@@ -57,85 +57,55 @@ export function BauCuaPanel() {
       if (r.net > 0) toast(`🎉 Bầu cua: bạn thắng +${fmt(r.net)} xu`, 'success');
       else if (r.net < 0) toast(`Bầu cua: bạn thua ${fmt(-r.net)} xu`, 'error');
     });
-    const t = setInterval(() => setNow(Date.now()), 200);
-    return () => { off1(); off2(); clearInterval(t); send('bc:leave'); };
+    return () => { off1(); off2(); send('bc:leave'); };
   }, []);
-
-  // Hiệu ứng lắc xúc xắc
-  useEffect(() => {
-    if (st?.phase !== 'rolling') return;
-    const t = setInterval(() => setRollFaces([rand6(), rand6(), rand6()]), 90);
-    sfx('dice');
-    const t2 = setInterval(() => sfx('dice'), 700);
-    return () => { clearInterval(t); clearInterval(t2); };
-  }, [st?.phase]);
 
   if (!st) return <Modal title="🎲 Bầu Cua Tôm Cá" onClose={() => set({ panel: null })}><p>Đang vào bàn...</p></Modal>;
 
-  const remain = Math.max(0, Math.ceil((st.endsAt - (now + offset)) / 1000));
   const betting = st.phase === 'betting';
   const myTotal = myBets.reduce((a, b) => a + b, 0);
-  const faces = st.phase === 'result' && st.dice ? st.dice : st.phase === 'rolling' ? rollFaces : null;
   const hits = st.dice && st.phase === 'result' ? st.dice : [];
 
+  // Đặt cược hiện ngay (không chờ server); server từ chối thì hoàn lại.
   async function bet(i: number) {
-    if (!betting) return;
-    const r = await call('bc:bet', { symbol: i, amount: chip });
-    if (r.ok) setMyBets(r.myBets);
+    if (!betting || chip > coins) return;
+    const amount = chip;
+    setMyBets((b) => b.map((v, k) => (k === i ? v + amount : v)));
+    pendingRef.current++;
+    const r = await call('bc:bet', { symbol: i, amount });
+    pendingRef.current--;
+    if (!r.ok) setMyBets((b) => b.map((v, k) => (k === i ? Math.max(0, v - amount) : v)));
+    // Chạm liên tục: chỉ lấy số của server khi không còn lượt cược nào đang chờ (tránh số nhảy lùi)
+    else if (pendingRef.current === 0) setMyBets(r.myBets);
   }
   async function clear() {
     const r = await call('bc:clear');
     if (r.ok) setMyBets(r.myBets);
   }
 
-  const BET_SECONDS = 20;
-  const ringPct = betting ? Math.min(1, remain / BET_SECONDS) : 0;
   const pot = st.totals.reduce((a, b) => a + b, 0);
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) set({ panel: null }); }}>
       <div className="arcade velvet">
         <div className="arcade-head">
-          <button className="btn small felt-back" onClick={() => set({ panel: 'games' })}>← Khu giải trí</button>
+          <button className="btn small felt-back" onClick={() => set({ panel: 'games' })} aria-label="Về Khu giải trí">←<span className="back-label"> Khu giải trí</span></button>
           <h2 className="neon">🎲 BẦU CUA TÔM CÁ</h2>
+          <GameChatButton />
           <span className="arcade-coins">💰 {fmt(coins)} xu</span>
           <button className="icon-btn arcade-close" onClick={() => set({ panel: null })} aria-label="Đóng">✕</button>
         </div>
 
         {/* Người đang ngồi ở bàn — cùng chơi một ván */}
-        {(st.seated?.length ?? 0) > 0 && (
-          <div className="bc-players">
-            {st.seated!.map((p) => (
-              <div key={p.id} className={`bc-player ${p.id === meId ? 'me' : ''}`} title={p.name}>
-                <div className="seat-ava"><AvatarPreview appearance={p.appearance} size={88} /></div>
-                <small>{p.id === meId ? 'Bạn' : p.name}</small>
-                {p.bet > 0 && <span className="pbet">{p.bet >= 1000 ? `${(p.bet / 1000).toFixed(p.bet % 1000 ? 1 : 0)}K` : p.bet}</span>}
-              </div>
-            ))}
-          </div>
-        )}
+        {(st.seated?.length ?? 0) > 0 && <BcPlayers seated={st.seated!} meId={meId} />}
 
         <div className="bc-stage">
           {/* Đồng hồ đếm ngược */}
-          <div className={`bc-timer ${st.phase}`}>
-            <svg viewBox="0 0 100 100">
-              <circle cx="50" cy="50" r="44" className="track" />
-              <circle cx="50" cy="50" r="44" className="bar" style={{ strokeDasharray: `${276.5 * ringPct} 276.5`, stroke: remain <= 5 ? '#ef476f' : '#ffd166' }} />
-            </svg>
-            <div className="bc-timer-text">
-              {betting ? <><b>{remain}</b><small>giây</small></> : st.phase === 'rolling' ? <><b>🎲</b><small>đang lắc</small></> : <><b>✨</b><small>kết quả</small></>}
-            </div>
-          </div>
+          <BcTimer phase={st.phase} endsAt={st.endsAt} offset={offset} />
 
           {/* Đĩa + bát úp */}
           <div className="bc-plate2">
-            <div className="dish">
-              {faces && faces.map((d, i) => (
-                <div key={i} className={`die ${st.phase === 'rolling' ? 'shake' : 'pop'}`} style={{ animationDelay: `${i * 0.08}s` }}>
-                  {BC_SYMBOLS[d].icon}
-                </div>
-              ))}
-            </div>
+            <BcDice phase={st.phase} dice={st.dice} />
             <div className={`bowl ${st.phase === 'result' ? 'lifted' : st.phase === 'rolling' ? 'shaking' : ''}`} />
             <div className="bc-call">
               {betting ? 'Đặt cược đi nào!' : st.phase === 'rolling' ? 'Lắc lắc lắc…' : result
@@ -201,3 +171,64 @@ export function BauCuaPanel() {
 function rand6() {
   return Math.floor(Math.random() * 6);
 }
+
+/** Đồng hồ đếm ngược: tự đếm riêng, không bắt cả bàn vẽ lại mỗi 200ms. */
+function BcTimer({ phase, endsAt, offset }: { phase: BcState['phase']; endsAt: number; offset: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (phase !== 'betting') return;
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [phase]);
+  const betting = phase === 'betting';
+  const remain = Math.max(0, Math.ceil((endsAt - (now + offset)) / 1000));
+  const ringPct = betting ? Math.min(1, remain / 20) : 0;
+  return (
+    <div className={`bc-timer ${phase}`}>
+      <svg viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="44" className="track" />
+        <circle cx="50" cy="50" r="44" className="bar" style={{ strokeDasharray: `${276.5 * ringPct} 276.5`, stroke: remain <= 5 ? '#ef476f' : '#ffd166' }} />
+      </svg>
+      <div className="bc-timer-text">
+        {betting ? <><b>{remain}</b><small>giây</small></> : phase === 'rolling' ? <><b>🎲</b><small>đang lắc</small></> : <><b>✨</b><small>kết quả</small></>}
+      </div>
+    </div>
+  );
+}
+
+/** Xúc xắc trong đĩa: hiệu ứng lắc chạy riêng trong component này. */
+function BcDice({ phase, dice }: { phase: BcState['phase']; dice: number[] | null }) {
+  const [rollFaces, setRollFaces] = useState([0, 1, 2]);
+  useEffect(() => {
+    if (phase !== 'rolling') return;
+    const t = setInterval(() => setRollFaces([rand6(), rand6(), rand6()]), 110);
+    sfx('dice');
+    const t2 = setInterval(() => sfx('dice'), 700);
+    return () => { clearInterval(t); clearInterval(t2); };
+  }, [phase]);
+  const faces = phase === 'result' && dice ? dice : phase === 'rolling' ? rollFaces : null;
+  return (
+    <div className="dish">
+      {faces && faces.map((d, i) => (
+        <div key={i} className={`die ${phase === 'rolling' ? 'shake' : 'pop'}`} style={{ animationDelay: `${i * 0.08}s` }}>
+          {BC_SYMBOLS[d].icon}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Hàng người chơi: chỉ vẽ lại khi danh sách / tiền cược thay đổi. */
+const BcPlayers = memo(function BcPlayers({ seated, meId }: { seated: NonNullable<BcState['seated']>; meId?: number }) {
+  return (
+    <div className="bc-players">
+      {seated.map((p) => (
+        <div key={p.id} className={`bc-player ${p.id === meId ? 'me' : ''}`} title={p.name}>
+          <div className="seat-ava"><AvatarPreview appearance={p.appearance} size={88} /></div>
+          <small>{p.id === meId ? 'Bạn' : p.name}</small>
+          {p.bet > 0 && <span className="pbet">{p.bet >= 1000 ? `${(p.bet / 1000).toFixed(p.bet % 1000 ? 1 : 0)}K` : p.bet}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}, (a, b) => a.meId === b.meId && JSON.stringify(a.seated) === JSON.stringify(b.seated));

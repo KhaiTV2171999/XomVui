@@ -31,7 +31,7 @@ export interface ChatMsg { id: number; kind: 'chat' | 'system' | 'pm'; name?: st
 export interface Toast { id: number; msg: string; kind: 'info' | 'success' | 'error' }
 export interface FriendRow { id: number; name: string; level: number; online?: boolean; zone?: string | null }
 
-export type Panel = null | 'shop' | 'inventory' | 'wardrobe' | 'friends' | 'messages' | 'map' | 'games' | 'baucua' | 'tienlen' | 'bus';
+export type Panel = null | 'shop' | 'inventory' | 'kho' | 'tui' | 'wardrobe' | 'friends' | 'messages' | 'map' | 'games' | 'baucua' | 'tienlen' | 'bus';
 
 export interface ChatMessage { id: number; from: number; to: number; text: string; at: number; read: boolean; fromName?: string }
 
@@ -59,6 +59,10 @@ interface State {
   unread: Record<number, number>;
   /** Đang đi xe buýt giữa các khu. */
   traveling: boolean;
+  /** Ngăn chat mở ngay trong khu giải trí (không rời bàn chơi). */
+  gameChat: null | 'community' | 'friends';
+  /** Tăng mỗi khi server gửi bảng giá mới → các bảng đang mở tự vẽ lại. */
+  catalogVer: number;
 }
 
 export const useStore = create<State>(() => ({
@@ -81,10 +85,14 @@ export const useStore = create<State>(() => ({
   chats: {},
   unread: {},
   traveling: false,
+  gameChat: null,
+  catalogVer: 0,
 }));
 
 export const set = useStore.setState;
 export const get = useStore.getState;
+// Chỉ khi chạy dev: cho phép script kiểm thử mở panel trực tiếp
+if (import.meta.env.DEV) (window as unknown as { __xv: unknown }).__xv = { set, get };
 
 let uid = 1;
 export function toast(msg: string, kind: Toast['kind'] = 'info') {

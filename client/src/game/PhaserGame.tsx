@@ -3,6 +3,7 @@ import Phaser from 'phaser';
 import { WorldScene } from './WorldScene';
 import { BusScene } from './BusScene';
 import { DPR } from './dpr';
+import { useStore } from '../store';
 
 export function PhaserGame() {
   const ref = useRef<HTMLDivElement>(null);
@@ -34,7 +35,19 @@ export function PhaserGame() {
     };
     const ro = new ResizeObserver(onResize);
     ro.observe(el);
-    return () => { ro.disconnect(); game.destroy(true); };
+
+    // Điện thoại: bảng phủ kín màn hình (tin nhắn, khu giải trí) che hết thế giới game →
+    // cho Phaser ngủ để máy dồn sức cho giao diện, gõ chữ / cuộn không bị khựng.
+    const FULL = new Set(['messages', 'games', 'baucua', 'tienlen']);
+    const mobile = window.matchMedia('(max-width: 760px), (max-height: 600px)');
+    const syncSleep = () => {
+      const hide = mobile.matches && FULL.has(useStore.getState().panel ?? '');
+      if (hide && game.loop.running) game.loop.sleep();
+      else if (!hide && !game.loop.running) game.loop.wake();
+    };
+    const unsub = useStore.subscribe((s, p) => { if (s.panel !== p.panel) syncSleep(); });
+    mobile.addEventListener('change', syncSleep);
+    return () => { unsub(); mobile.removeEventListener('change', syncSleep); ro.disconnect(); game.destroy(true); };
   }, []);
 
   return <div ref={ref} className="phaser-root" />;

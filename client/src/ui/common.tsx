@@ -1,8 +1,12 @@
-import { Component, ReactNode, useEffect, useRef } from 'react';
+import { Component, memo, ReactNode, useEffect, useRef } from 'react';
 import type { Appearance } from '../../../shared/catalog';
 import { AV_H, AV_W, drawAvatar } from '../avatar/draw';
 
-export function AvatarPreview({ appearance, size = 120, className = '' }: { appearance: Appearance; size?: number; className?: string }) {
+/** Hình nhân vật: chỉ vẽ lại canvas khi ngoại hình / cỡ thật sự đổi (không vẽ lại vì object mới y hệt). */
+export const AvatarPreview = memo(AvatarPreviewImpl, (a, b) =>
+  a.size === b.size && a.className === b.className && JSON.stringify(a.appearance) === JSON.stringify(b.appearance));
+
+function AvatarPreviewImpl({ appearance, size = 120, className = '' }: { appearance: Appearance; size?: number; className?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const w = Math.round((size * AV_W) / AV_H);
   useEffect(() => {

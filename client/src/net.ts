@@ -3,7 +3,8 @@ import { io, Socket } from 'socket.io-client';
 import { addChat, get, set, toast } from './store';
 import type { ChatMessage, FarmData, Me, PlayerPub, ZoneInfo } from './store';
 import { sfx } from './sound';
-import type { Appearance } from '../../shared/catalog';
+import type { Appearance, CatalogPayload } from '../../shared/catalog';
+import { applyCatalog } from '../../shared/catalog';
 
 type Handler = (data: any) => void;
 
@@ -47,6 +48,12 @@ export function connect(token: string) {
   });
 
   socket.on('me', (me: Me) => set({ me }));
+  // Bảng giá nông trại (lưu trong DB server) — nạp vào CROPS/ANIMALS/ITEMS dùng chung, rồi vẽ lại giao diện
+  socket.on('catalog', (c: CatalogPayload) => {
+    applyCatalog(c);
+    set((s) => ({ catalogVer: s.catalogVer + 1 }));
+    bus.emit('catalog', c);
+  });
   socket.on('toast', ({ msg, kind }) => toast(msg, kind));
   socket.on('friends', (friends) => set({ friends }));
 
@@ -71,8 +78,8 @@ export function connect(token: string) {
     set((s) => (s.chats[other] && !s.chats[other].some((x) => x.id === m.id)
       ? { chats: { ...s.chats, [other]: [...s.chats[other], m] } } : {}));
     if (m.from === meId) return;
-    const { panel, chatWith } = get();
-    if (panel === 'messages' && chatWith?.id === other) {
+    const { panel, chatWith, gameChat } = get();
+    if ((panel === 'messages' || gameChat === 'friends') && chatWith?.id === other) {
       send('pm:read', { with: other });
     } else {
       set((s) => ({ unread: { ...s.unread, [other]: (s.unread[other] ?? 0) + 1 } }));
@@ -94,6 +101,9 @@ export function connect(token: string) {
 }
 
 /** Đi tới khu khác (có cảnh xe buýt nếu phù hợp). */
+// Chỉ khi chạy dev: cho script kiểm thử đi tới khu khác
+if (import.meta.env.DEV) (window as unknown as { __xvTravel: unknown }).__xvTravel = (z: string) => travel(z);
+
 export function travel(zone: string) {
   bus.emit('travel', zone);
 }

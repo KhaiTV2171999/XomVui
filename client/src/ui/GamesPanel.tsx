@@ -1,3 +1,4 @@
+import { GameChatButton } from './GameChat';
 import { useEffect, useState } from 'react';
 import { call } from '../net';
 import { fmt, set, useStore } from '../store';
@@ -40,6 +41,7 @@ export function GamesPanel() {
         <div className="arcade-bulbs" aria-hidden>{Array.from({ length: 24 }, (_, i) => <i key={i} style={{ animationDelay: `${(i % 4) * 0.25}s` }} />)}</div>
         <div className="arcade-head">
           <h2 className="neon">🎪 KHU GIẢI TRÍ</h2>
+          <GameChatButton />
           <span className="arcade-coins">💰 {fmt(coins)} xu</span>
           <button className="icon-btn arcade-close" onClick={close} aria-label="Đóng">✕</button>
         </div>
@@ -102,6 +104,7 @@ export function GamesPanel() {
               <div className="tile-art"><span className="soon-icon">{icon}</span></div>
               <div className="tile-name">{name}</div>
               <div className="tile-live">🔒 Đang xây dựng</div>
+              <span className="play-btn locked">SẮP CÓ</span>
             </div>
           ))}
         </div>

@@ -1,7 +1,10 @@
-import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { call } from '../net';
 import { ChatMessage, set, useStore } from '../store';
 import { Modal } from './common';
+
+/** Dùng cho nút Gửi: giữ focus ở ô nhập để bàn phím điện thoại không bị đóng rồi mở lại. */
+export const keepFocus = (e: { preventDefault: () => void }) => e.preventDefault();
 
 function timeLabel(at: number) {
   const d = new Date(at);
@@ -13,6 +16,16 @@ function timeLabel(at: number) {
 
 /** Hộp thư: danh sách bạn bè bên trái, khung trò chuyện bên phải. */
 export function MessengerPanel() {
+  const close = () => set({ panel: null, chatWith: null });
+  return (
+    <Modal title="💬 Tin nhắn" onClose={close} wide className="messenger-modal">
+      <MessengerBody />
+    </Modal>
+  );
+}
+
+/** Nội dung hộp thư — dùng lại trong ngăn chat của khu giải trí. */
+export function MessengerBody() {
   const friends = useStore((s) => s.friends.friends);
   const chatWith = useStore((s) => s.chatWith);
   const unread = useStore((s) => s.unread);
@@ -27,10 +40,7 @@ export function MessengerPanel() {
     || (last[b.id]?.at ?? 0) - (last[a.id]?.at ?? 0)
     || Number(!!b.online) - Number(!!a.online));
 
-  const close = () => set({ panel: null, chatWith: null });
-
   return (
-    <Modal title="💬 Tin nhắn" onClose={close} wide className="messenger-modal">
       <div className={`messenger ${chatWith ? 'has-chat' : ''}`}>
         <div className="msg-list">
           {sorted.length === 0 && <p className="empty">Chưa có bạn bè. Kết bạn để nhắn tin nhé!</p>}
@@ -49,7 +59,6 @@ export function MessengerPanel() {
         {chatWith ? <Conversation key={chatWith.id} friendId={chatWith.id} name={chatWith.name} />
           : <div className="msg-empty">Chọn một người bạn để bắt đầu trò chuyện 💬</div>}
       </div>
-    </Modal>
   );
 }
 
@@ -70,12 +79,22 @@ function Conversation({ friendId, name }: { friendId: number; name: string }) {
       set((s) => ({ chats: { ...s.chats, [friendId]: r.messages }, unread: { ...s.unread, [friendId]: 0 } }));
       setMore(r.messages.length >= 40);
     });
-    inputRef.current?.focus();
+    // Chỉ tự focus trên máy tính — trên điện thoại sẽ bật bàn phím che mất màn hình
+    if (window.matchMedia('(pointer: fine)').matches) inputRef.current?.focus();
   }, [friendId]);
 
   useLayoutEffect(() => {
     logRef.current?.scrollTo(0, logRef.current.scrollHeight);
   }, [messages?.length]);
+
+  // Bàn phím bật/tắt làm khung chat đổi cỡ → giữ tin mới nhất trong tầm nhìn
+  useEffect(() => {
+    const el = logRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => el.scrollTo(0, el.scrollHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   async function loadOlder() {
     if (!messages?.length) return;
@@ -87,6 +106,20 @@ function Conversation({ friendId, name }: { friendId: number; name: string }) {
     setMore(r.messages.length >= 40);
     requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - prevH; });
   }
+
+  // Danh sách bong bóng chỉ dựng lại khi có tin mới — gõ chữ không phải vẽ lại cả lịch sử
+  const bubbles = useMemo(() => messages?.map((m, i) => {
+    const mine = m.from === meId;
+    const showTime = i === 0 || m.at - messages[i - 1].at > 5 * 60_000;
+    return (
+      <div key={m.id}>
+        {showTime && <div className="msg-time">{timeLabel(m.at)}</div>}
+        <div className={`msg-row ${mine ? 'mine' : ''}`}>
+          <div className="msg-bubble" title={timeLabel(m.at)}>{m.text}</div>
+        </div>
+      </div>
+    );
+  }), [messages, meId]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -110,22 +143,12 @@ function Conversation({ friendId, name }: { friendId: number; name: string }) {
         {more && messages && messages.length > 0 && <button className="btn small msg-more" onClick={loadOlder}>Tải tin cũ hơn</button>}
         {!messages && <p className="empty">Đang tải…</p>}
         {messages && messages.length === 0 && <p className="empty">Hãy gửi lời chào tới {name} 👋</p>}
-        {messages?.map((m, i) => {
-          const mine = m.from === meId;
-          const showTime = i === 0 || m.at - messages[i - 1].at > 5 * 60_000;
-          return (
-            <div key={m.id}>
-              {showTime && <div className="msg-time">{timeLabel(m.at)}</div>}
-              <div className={`msg-row ${mine ? 'mine' : ''}`}>
-                <div className="msg-bubble" title={timeLabel(m.at)}>{m.text}</div>
-              </div>
-            </div>
-          );
-        })}
+        {bubbles}
       </div>
       <form className="msg-input" onSubmit={submit}>
         <input ref={inputRef} value={text} maxLength={300} onChange={(e) => setText(e.target.value)} placeholder={`Nhắn cho ${name}…`} />
-        <button className="btn primary" disabled={!text.trim() || sending}>Gửi</button>
+        {/* Chạm nút không lấy focus khỏi ô nhập → bàn phím không đóng/mở lại (khung chat không giật) */}
+        <button className="btn primary" disabled={!text.trim() || sending} onPointerDown={keepFocus} onMouseDown={keepFocus}>Gửi</button>
       </form>
     </div>
   );

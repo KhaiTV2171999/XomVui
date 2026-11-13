@@ -1,3 +1,4 @@
+import { GameChatButton } from './GameChat';
 import { useEffect, useMemo, useState } from 'react';
 import type { Appearance } from '../../../shared/catalog';
 import { analyze, beats, Combo, COMBO_NAMES, RANKS, rankOf, suitOf, SUITS } from '../../../shared/tienlen';
@@ -88,8 +89,9 @@ export function TienLenPanel() {
       <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
         <div className="arcade felt">
           <div className="arcade-head">
-            <button className="btn small felt-back" onClick={() => set({ panel: 'games' })}>← Khu giải trí</button>
+            <button className="btn small felt-back" onClick={() => set({ panel: 'games' })} aria-label="Về Khu giải trí">←<span className="back-label"> Khu giải trí</span></button>
             <h2 className="neon">🃏 CLB TIẾN LÊN</h2>
+            <GameChatButton />
             <span className="arcade-coins">💰 {fmt(coins)} xu</span>
             <button className="icon-btn arcade-close" onClick={close} aria-label="Đóng">✕</button>
           </div>
@@ -169,16 +171,14 @@ export function TienLenPanel() {
 function TableView({ table, meId, onClose }: { table: TableState; meId: number; onClose: () => void }) {
   const [sel, setSel] = useState<number[]>([]);
   const myCoins = useStore((s) => s.me?.coins ?? 0);
-  const [now, setNow] = useState(Date.now());
-  const offset = table.now - Date.now();
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 250); return () => clearInterval(t); }, []);
+  // Độ lệch giờ với server: tính một lần mỗi khi nhận trạng thái bàn mới
+  const offset = useMemo(() => table.now - Date.now(), [table.now]);
   useEffect(() => { setSel((s) => s.filter((c) => table.myHand.includes(c))); }, [table.myHand]);
 
   const isHost = table.hostId === meId;
   const myTurn = table.playing && table.turn === table.mySeat;
   const combo = useMemo(() => analyze(sel), [sel]);
   const canPlay = myTurn && !!combo && beats(combo, table.current?.combo ?? null);
-  const remain = Math.max(0, (table.turnEndsAt - (now + offset)) / 1000);
 
   const toggle = (c: number) => setSel((s) => (s.includes(c) ? s.filter((x) => x !== c) : [...s, c]));
   const play = async () => { const r = await call('tl:play', { cards: sel }); if (r.ok) setSel([]); };
@@ -191,11 +191,12 @@ function TableView({ table, meId, onClose }: { table: TableState; meId: number; 
     <div className="modal-backdrop">
      <div className="arcade felt tl-room-view">
       <div className="arcade-head">
-        <button className="btn small felt-back" onClick={onClose}>← Rời bàn</button>
+        <button className="btn small felt-back" onClick={onClose} aria-label="Rời bàn">←<span className="back-label"> Rời bàn</span></button>
         <h2 className="neon">🃏 BÀN #{table.id}</h2>
         <span className="mini-chip inline" style={{ ['--chip' as string]: table.stake >= 5000 ? '#ffb703' : table.stake >= 1000 ? '#ef476f' : table.stake >= 500 ? '#06d6a0' : '#4cc9f0' }}>
           {table.stake >= 1000 ? `${table.stake / 1000}K` : table.stake}
         </span>
+        <GameChatButton />
         <span className="arcade-coins">💰 {fmt(myCoins)} xu</span>
       </div>
       <div className="tl-table">
@@ -212,7 +213,7 @@ function TableView({ table, meId, onClose }: { table: TableState; meId: number; 
                     {table.playing && <div className="tl-count"><span className="card-back" /> {s.count} lá</div>}
                     {s.passed && table.playing && <div className="tl-passed">Bỏ lượt</div>}
                   </div>
-                  {table.playing && table.turn === i && <TimerBar remain={remain} max={s.kind === 'bot' ? 1.5 : 20} />}
+                  {table.playing && table.turn === i && <TimerBar endsAt={table.turnEndsAt} offset={offset} max={s.kind === 'bot' ? 1.5 : 20} />}
                   {isHost && !table.playing && s.kind === 'bot' && (
                     <button className="btn tiny danger" onClick={() => call('tl:removeBot', { seat: i })}>Bỏ bot</button>
                   )}
@@ -264,7 +265,7 @@ function TableView({ table, meId, onClose }: { table: TableState; meId: number; 
       </div>
 
       <div className={`tl-me ${myTurn ? 'turn' : ''}`}>
-        {myTurn && <TimerBar remain={remain} max={20} />}
+        {myTurn && <TimerBar endsAt={table.turnEndsAt} offset={offset} max={20} />}
         <div className="tl-hand">
           {table.myHand.map((c) => <Card key={c} c={c} selected={sel.includes(c)} onClick={() => toggle(c)} />)}
           {!table.playing && table.myHand.length === 0 && <span className="hint">Bài của bạn sẽ hiện ở đây</span>}
@@ -283,7 +284,11 @@ function TableView({ table, meId, onClose }: { table: TableState; meId: number; 
   );
 }
 
-function TimerBar({ remain, max }: { remain: number; max: number }) {
+/** Thanh thời gian lượt: tự đếm riêng, không bắt cả bàn (và bài trên tay) vẽ lại liên tục. */
+function TimerBar({ endsAt, offset, max }: { endsAt: number; offset: number; max: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 200); return () => clearInterval(t); }, []);
+  const remain = Math.max(0, (endsAt - (now + offset)) / 1000);
   const pct = Math.max(0, Math.min(100, (remain / max) * 100));
   return <div className="timer-bar"><div style={{ width: `${pct}%`, background: pct < 30 ? '#ef476f' : '#06d6a0' }} /></div>;
 }

@@ -29,6 +29,7 @@ function DogCard({ level }: { level: number }) {
 type Tab ='seed' | 'animal' | 'clothing' | 'sell';
 
 export function ShopPanel() {
+  useStore((s) => s.catalogVer); // vẽ lại khi bảng giá đổi
   const me = useStore((s) => s.me)!;
   const zoneKind = useStore((s) => s.zone?.kind);
   // Ở nông trại: hạt giống, vật nuôi, bán nông sản. Ở nơi khác: chỉ quần áo, phụ kiện.

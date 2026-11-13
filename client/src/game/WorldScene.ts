@@ -608,39 +608,53 @@ export class WorldScene extends Phaser.Scene {
     this.plotViews.forEach((v, i) => {
       const { x, y } = plotPos(i);
       const pl = farm.plots[i];
-      v.bar.clear();
-      v.status.setText('');
-      v.lock.setText('');
-      v.crop.setVisible(false);
+      // Gom nội dung rồi chỉ đổi khi khác: đổi chữ Phaser = vẽ lại ảnh chữ + tải lên GPU (rất tốn nếu mỗi giây)
+      let status = '', lock = '', lockY = y + 20, lockSize = 14, barPr = -1;
       if (!pl) {
         v.cropKey = null;
-        v.soil.setTexture('soil_locked').setVisible(owner && i === farm.plots.length);
-        if (owner && i === farm.plots.length) v.lock.setText(`🔒 ${fmt(plotPrice(farm.plots.length))} xu`).setY(y + 20).setFontSize(14);
-        return;
-      }
-      v.soil.setVisible(true);
-      if (!pl.crop) { v.soil.setTexture('soil'); v.cropKey = null; return; }
-      const st = plotStage(pl);
-      v.soil.setTexture(pl.waterStage === st && st < 3 ? 'soil_wet' : 'soil');
-      const cropKey = T.cropTexture(this, pl.crop, st);
-      v.crop.setTexture(cropKey).setVisible(true);
-      if (v.cropKey !== cropKey) {
-        // Chỉ chuyển động khi cây thay đổi, không khởi động lại mỗi giây.
-        this.tweens.killTweensOf(v.crop);
-        v.crop.setScale(v.cropKey ? .86 : .94).setAlpha(.6);
-        this.tweens.add({ targets: v.crop, scale: 1, alpha: 1, duration: 340, ease: 'Sine.easeOut' });
-        v.cropKey = cropKey;
-      }
-      const c = CROPS[pl.crop];
-      if (st === 3) {
-        const canSteal = !owner && !pl.stolenBy.includes(meId) && pl.yieldLeft > stealFloor(c.yield);
-        v.status.setText(owner ? '✨' : canSteal ? '🖐️' : '');
+        v.crop.setVisible(false);
+        setTex(v.soil, 'soil_locked');
+        v.soil.setVisible(owner && i === farm.plots.length);
+        if (owner && i === farm.plots.length) lock = `🔒 ${fmt(plotPrice(farm.plots.length))} xu`;
       } else {
-        if (canWater(pl)) v.status.setText('💧');
-        const pr = plotProgress(pl);
-        v.lock.setText(clock(plotRemainMs(pl))).setY(y + PLOT_H / 2 + 12).setFontSize(12);
+        v.soil.setVisible(true);
+        if (!pl.crop) {
+          setTex(v.soil, 'soil');
+          v.crop.setVisible(false);
+          v.cropKey = null;
+        } else {
+          const st = plotStage(pl);
+          setTex(v.soil, pl.waterStage === st && st < 3 ? 'soil_wet' : 'soil');
+          const cropKey = T.cropTexture(this, pl.crop, st);
+          v.crop.setVisible(true);
+          if (v.cropKey !== cropKey) {
+            v.crop.setTexture(cropKey);
+            // Chỉ chuyển động khi cây thay đổi, không khởi động lại mỗi giây.
+            this.tweens.killTweensOf(v.crop);
+            v.crop.setScale(v.cropKey ? .86 : .94).setAlpha(.6);
+            this.tweens.add({ targets: v.crop, scale: 1, alpha: 1, duration: 340, ease: 'Sine.easeOut' });
+            v.cropKey = cropKey;
+          }
+          const c = CROPS[pl.crop];
+          if (st === 3) {
+            const canSteal = !owner && !pl.stolenBy.includes(meId) && pl.yieldLeft > stealFloor(c.yield);
+            status = owner ? '✨' : canSteal ? '🖐️' : '';
+          } else {
+            if (canWater(pl)) status = '💧';
+            barPr = plotProgress(pl);
+            lock = clock(plotRemainMs(pl));
+            lockY = y + PLOT_H / 2 + 12;
+            lockSize = 12;
+          }
+        }
+      }
+      setTxt(v.status, status);
+      if (lock) { if (v.lock.y !== lockY) v.lock.setY(lockY); if (v.lock.style.fontSize !== `${lockSize}px`) v.lock.setFontSize(lockSize); }
+      setTxt(v.lock, lock);
+      v.bar.clear();
+      if (barPr >= 0) {
         v.bar.fillStyle(0x000000, 0.35).fillRoundedRect(x - 36, y + PLOT_H / 2 - 4, 72, 8, 4);
-        v.bar.fillStyle(0x80ed99, 1).fillRoundedRect(x - 35, y + PLOT_H / 2 - 3, 70 * pr, 6, 3);
+        v.bar.fillStyle(0x80ed99, 1).fillRoundedRect(x - 35, y + PLOT_H / 2 - 3, 70 * barPr, 6, 3);
       }
     });
 
@@ -648,8 +662,8 @@ export class WorldScene extends Phaser.Scene {
       const an = farm.animals[i];
       v.barBg.setVisible(false);
       v.bar.setVisible(false);
-      v.status.setText('');
       if (!an) {
+        setTxt(v.status, '');
         v.wander?.stop(); v.wander = null; v.type = null;
         const { x, y } = animalPos(i);
         v.icon.setPosition(x, y).setTexture(T.animalTexture(this, 'add')).setScale(.85).setAlpha(.8).setFlipX(false).setVisible(owner && i === farm.animals.length);
@@ -662,13 +676,14 @@ export class WorldScene extends Phaser.Scene {
         this.wander(v);
       }
       const remain = animalRemainMs(an);
-      if (remain < 0) v.status.setText(owner ? '🌾' : '');
+      if (remain < 0) setTxt(v.status, owner ? '🌾' : '');
       else if (remain === 0) {
         // Chủ: biểu tượng sản phẩm để thu; khách: 🖐️ nếu còn lấy trộm được
         const canSteal = !owner && !(an.stolenBy ?? []).includes(meId) && (an.left ?? def.qty) > stealFloor(def.qty);
-        v.status.setText(owner ? ITEMS[def.product].icon : canSteal ? '🖐️' : '');
+        setTxt(v.status, owner ? ITEMS[def.product].icon : canSteal ? '🖐️' : '');
       }
       else {
+        setTxt(v.status, '');
         v.barBg.setVisible(true);
         v.bar.setVisible(true).setSize(54 * (1 - remain / an.produceMs), 5);
       }
@@ -877,3 +892,12 @@ export class WorldScene extends Phaser.Scene {
   }
 }
 
+
+/** Chỉ đổi chữ khi khác (Phaser vẽ lại ảnh chữ + tải lên GPU mỗi lần setText). */
+function setTxt(t: Phaser.GameObjects.Text, str: string) {
+  if (t.text !== str) t.setText(str);
+}
+/** Chỉ đổi ảnh khi khác. */
+function setTex(img: Phaser.GameObjects.Image, key: string) {
+  if (img.texture.key !== key) img.setTexture(key);
+}

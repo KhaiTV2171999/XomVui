@@ -51,8 +51,21 @@ function seatedPlayers() {
     .slice(0, 16);
 }
 
+/** Gửi trạng thái bàn ngay (dùng khi chuyển giai đoạn: nhận cược → lắc → mở bát). */
 function broadcast() {
+  if (pending) { clearTimeout(pending); pending = null; }
+  lastSent = Date.now();
   getIo().to(ROOM).emit('bc:state', publicState());
+}
+
+// Cược / vào / rời bàn dồn dập → gộp lại, gửi tối đa ~4 lần/giây thay vì mỗi thao tác một lần.
+const COALESCE_MS = 250;
+let pending: ReturnType<typeof setTimeout> | null = null;
+let lastSent = 0;
+function broadcastSoon() {
+  if (pending) return;
+  const wait = Math.max(0, COALESCE_MS - (Date.now() - lastSent));
+  pending = setTimeout(() => { pending = null; broadcast(); }, wait);
 }
 
 function startBetting() {
@@ -116,13 +129,13 @@ export function registerBauCua(socket: Socket, p: OnlinePlayer) {
 
   handle(socket, 'bc:join', () => {
     socket.join(ROOM);
-    broadcast();
+    broadcastSoon();
     return { state: publicState(), myBets: myBets(), chips: BC_CHIPS };
   });
 
   handle(socket, 'bc:leave', () => {
     socket.leave(ROOM);
-    broadcast();
+    broadcastSoon();
   });
 
   handle<{ symbol: number; amount: number }>(socket, 'bc:bet', async ({ symbol, amount }) => {
@@ -145,7 +158,7 @@ export function registerBauCua(socket: Socket, p: OnlinePlayer) {
     cur[s] += a;
     st.bets.set(uid, cur);
     st.totals[s] += a;
-    broadcast();
+    broadcastSoon();
     await pushMe(uid);
     return { myBets: cur };
   });
@@ -159,7 +172,7 @@ export function registerBauCua(socket: Socket, p: OnlinePlayer) {
     bets.forEach((a, i) => (st.totals[i] -= a));
     const total = bets.reduce((x, y) => x + y, 0);
     await addCoins(uid, total);
-    broadcast();
+    broadcastSoon();
     await pushMe(uid);
     return { myBets: [0, 0, 0, 0, 0, 0] };
   });

@@ -10,8 +10,9 @@ import { FriendsPanel, InventoryPanel, PlayerCard } from './SocialPanels';
 import { BauCuaPanel } from './BauCuaPanel';
 import { TienLenPanel } from './TienLenPanel';
 import { GamesPanel } from './GamesPanel';
-import { MessengerPanel } from './MessengerPanel';
+import { keepFocus, MessengerPanel } from './MessengerPanel';
 import { BusStopPanel } from './BusStopPanel';
+import { GameChatDrawer } from './GameChat';
 import { audioPrefs, onAudioPrefs, toggleMusic, toggleSfx } from '../sound';
 
 export function HUD() {
@@ -33,7 +34,8 @@ export function HUD() {
       <PanelBoundary key={panel ?? 'none'} onClose={() => set({ panel: null })}>
       {panel === 'shop' && <ShopPanel />}
       {panel === 'wardrobe' && <WardrobePanel />}
-      {panel === 'inventory' && <InventoryPanel />}
+      {(panel === 'kho' || panel === 'inventory') && <InventoryPanel tab="kho" />}
+      {panel === 'tui' && <InventoryPanel tab="tui" />}
       {panel === 'friends' && <FriendsPanel />}
       {panel === 'messages' && <MessengerPanel />}
       {panel === 'map' && <BusStopPanel title="🗺️ Bản đồ Xóm Vui" />}
@@ -42,6 +44,7 @@ export function HUD() {
       {panel === 'baucua' && <BauCuaPanel />}
       {panel === 'tienlen' && <TienLenPanel />}
       </PanelBoundary>
+      {(panel === 'games' || panel === 'baucua' || panel === 'tienlen') && <GameChatDrawer />}
       {playerCard != null && <PlayerCard />}
       <ConfirmBox />
     </div>
@@ -69,11 +72,11 @@ function VisitBar() {
     if (animalRemainMs(an) === 0 && !(an.stolenBy ?? []).includes(meId) && (an.left ?? def.qty) > stealFloor(def.qty)) steal++;
   }
   return (
-    <div className="farm-visit">
-      <span className="visit-title">👀 Đang thăm nông trại của <b>{zone.ownerName}</b></span>
-      <span className={steal ? 'visit-chip hot' : 'visit-chip'}>🖐️ Hái trộm được: <b>{steal}</b></span>
-      <span className="visit-chip">💧 Tưới giúp: <b>{water}</b> <small>(+5 xu/lần)</small></span>
-      <button className="btn small primary" onClick={() => travel('myfarm')}>🏡 Về nông trại</button>
+    <div className="farm-toolbar farm-visit" role="region" aria-label="Thăm nông trại">
+      <span className="visit-title" title={`Đang thăm nông trại của ${zone.ownerName}`}>👀 <b>{zone.ownerName}</b></span>
+      <span className={steal ? 'visit-chip hot' : 'visit-chip'} title="Số ô/chuồng có thể hái trộm">🖐️ <b>{steal}</b></span>
+      <span className="visit-chip" title="Số ô cần tưới giúp (+5 xu mỗi lần)">💧 <b>{water}</b></span>
+      <button className="btn small primary visit-home" onClick={() => travel('myfarm')} aria-label="Về nông trại">🏡 Về nhà</button>
     </div>
   );
 }
@@ -188,7 +191,8 @@ function MenuButtons() {
     ...(onMyFarm
       ? [['shop', '🌱', 'Cửa hàng', '#80c35a'] as [Panel, string, string, string]]
       : [['farm', '🏡', 'Về nông trại', '#80c35a'] as ['farm', string, string, string]]),
-    ['inventory', '🎒', 'Túi đồ', '#ff9f43'],
+    ['kho', '🏚️', 'Kho', '#d4a373'],
+    ['tui', '🎒', 'Túi đồ', '#ff9f43'],
     ['messages', '💬', 'Tin nhắn', '#38bdf8'],
     ['friends', '👥', 'Bạn bè', '#a78bfa'],
   ];
@@ -257,7 +261,7 @@ function ChatBox() {
             <button type="button" className="emo-btn" onClick={() => setShowEmo(!showEmo)}>😊</button>
             <input ref={inputRef} value={text} maxLength={120} onChange={(e) => setText(e.target.value)} placeholder="Nói gì đó với mọi người..."
               onKeyDown={(e) => { if (e.key === 'Escape') (e.target as HTMLInputElement).blur(); }} />
-            <button className="btn small primary">Gửi</button>
+            <button className="btn small primary" onPointerDown={keepFocus} onMouseDown={keepFocus}>Gửi</button>
           </form>
         </>
       )}
@@ -266,6 +270,7 @@ function ChatBox() {
 }
 
 function FarmToolbar() {
+  useStore((s) => s.catalogVer); // vẽ lại khi bảng giá đổi
   const tool = useStore((s) => s.farmTool);
   const inv = useStore((s) => s.me!.inventory);
   const level = useStore((s) => s.me!.level);

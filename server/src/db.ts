@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import pg from 'pg';
 import {
-  Appearance, DEFAULT_APPEARANCE, START_PLOTS, STARTER_COINS, STARTER_ITEMS, xpToNext,
+  Appearance, DEFAULT_APPEARANCE, START_PLOTS, ECON, STARTER_ITEMS, xpToNext,
 } from '../../shared/catalog';
 
 // ------------------------------------------------------------ Kết nối PostgreSQL
@@ -100,6 +100,31 @@ CREATE INDEX IF NOT EXISTS messages_unread ON messages (to_id) WHERE read_at IS 
 /** Tạo bảng nếu chưa có. Gọi một lần khi server khởi động. */
 export async function initDb() {
   await pool.query(SCHEMA);
+  await migrate('2026-11-starter-neutral', `
+    -- Đồ khởi đầu trung tính: "Chân váy hồng" (tặng sẵn trước đây) → "Áo thun hồng"
+    INSERT INTO inventory (user_id, item_id, qty)
+      SELECT user_id, 'cl:tee_pink', 1 FROM inventory WHERE item_id = 'cl:skirt_pink' AND qty > 0
+      ON CONFLICT (user_id, item_id) DO NOTHING;
+    UPDATE profiles SET appearance = jsonb_set(appearance, '{bottom}', '"cl:pants_denim"')
+      WHERE appearance->>'bottom' = 'cl:skirt_pink';
+    DELETE FROM inventory WHERE item_id = 'cl:skirt_pink';`);
+}
+
+/** Chạy một đoạn SQL đúng một lần cho mỗi database (ghi dấu trong bảng migrations). */
+async function migrate(name: string, sql: string) {
+  await pool.query('CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY, at TIMESTAMPTZ NOT NULL DEFAULT now())');
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    const r = await c.query('INSERT INTO migrations (name) VALUES ($1) ON CONFLICT DO NOTHING', [name]);
+    if (r.rowCount) { await c.query(sql); console.log(`🛠️  Migration: ${name}`); }
+    await c.query('COMMIT');
+  } catch (e) {
+    await c.query('ROLLBACK');
+    throw e;
+  } finally {
+    c.release();
+  }
 }
 
 export class GameError extends Error {}
@@ -144,7 +169,7 @@ export async function createUser(username: string, passHash: string): Promise<nu
       'INSERT INTO users (username, pass, created_at) VALUES ($1, $2, $3) RETURNING id', [username, passHash, Date.now()],
     ))!;
     await all('INSERT INTO profiles (user_id, name, coins, appearance) VALUES ($1, $2, $3, $4)',
-      [id, username, STARTER_COINS, JSON.stringify(DEFAULT_APPEARANCE)]);
+      [id, username, ECON.starterCoins, JSON.stringify(DEFAULT_APPEARANCE)]);
     for (const [item, qty] of Object.entries(STARTER_ITEMS)) await addItem(id, item, qty);
     await saveFarm(id, newFarm());
     return id;

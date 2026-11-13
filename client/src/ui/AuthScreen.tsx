@@ -4,7 +4,7 @@ import { set } from '../store';
 import { AvatarPreview } from './common';
 
 const DEMO = [
-  { skin: 0, hair: 5, hairColor: 5, top: 'cl:dress_pink', bottom: 'cl:skirt_pink', hat: 'cl:flower_crown', acc: null },
+  { skin: 0, hair: 5, hairColor: 5, top: 'cl:tee_pink', bottom: 'cl:shorts_khaki', hat: 'cl:flower_crown', acc: null },
   { skin: 2, hair: 1, hairColor: 0, top: 'cl:hoodie_yellow', bottom: 'cl:pants_denim', hat: 'cl:cap_blue', acc: null },
   { skin: 1, hair: 2, hairColor: 3, top: 'cl:aodai_red', bottom: 'cl:pants_black', hat: 'cl:nonla', acc: null },
 ];
