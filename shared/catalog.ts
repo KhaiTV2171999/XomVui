@@ -1,6 +1,12 @@
 // Danh mục vật phẩm dùng chung cho client và server.
 
-export type Slot = 'top' | 'bottom' | 'hat' | 'acc';
+/** Ô trang bị: quần áo (Tiệm thời trang) + đồ cầm tay / ngậm / phương tiện (Cửa hàng). */
+export type Slot = 'top' | 'bottom' | 'hat' | 'acc' | 'hand' | 'mouth' | 'ride';
+/** Các ô không bắt buộc (có thể tháo ra). */
+export const OPTIONAL_SLOTS: Slot[] = ['hat', 'acc', 'hand', 'mouth', 'ride'];
+/** Ô bán ở Tiệm thời trang / ở Cửa hàng vật phẩm. */
+export const FASHION_SLOTS: Slot[] = ['top', 'bottom', 'hat', 'acc'];
+export const GEAR_SLOTS: Slot[] = ['hand', 'mouth', 'ride'];
 export type ItemKind = 'seed' | 'produce' | 'feed' | 'clothing';
 
 export interface Item {
@@ -15,6 +21,10 @@ export interface Item {
   style?: string;
   color?: string;
   color2?: string;
+  /** Phương tiện: hệ số tốc độ đi (1.5 = nhanh gấp rưỡi) */
+  speed?: number;
+  /** Mô tả ngắn hiện ở cửa hàng */
+  desc?: string;
 }
 
 export interface CropDef {
@@ -54,6 +64,44 @@ export const ECON = {
   starterCoins: 2000,
   /** Giá mở ô đất thứ n = plotStep × (n − 4). */
   plotStep: 300,
+  // ---- Cảnh sát tuần tra ----
+  /** Cảnh sát ở lại mỗi nông trại bao lâu (giây) */
+  policeStaySec: 15,
+  /** Thời gian di chuyển giữa hai nhà (giây) */
+  policeGapSec: 40,
+  /** Cảnh sát ập tới: bắt ai đã trộm ở nhà này trong khoảng (giây) trước đó mà vẫn còn ở đây */
+  policeLookbackSec: 180,
+  /** Tiền phạt = fineBase × số lần vi phạm (xu, không về ai — tiền bị thu hồi) */
+  fineBase: 100,
+  /** Lao động công ích = jailMinPerOffense × số lần vi phạm (phút), tối đa jailMaxMin */
+  jailMinPerOffense: 10,
+  jailMaxMin: 120,
+  // ---- Nâng cấp ô đất ("Đất màu mỡ") ----
+  /** Giá nâng cấp 1 ô đất (xu) */
+  plotUpgradePrice: 1500,
+  /** Cấp người chơi tối thiểu để nâng cấp đất */
+  plotUpgradeLevel: 3,
+  /** Hệ số sản lượng của ô đã nâng cấp (1.5 = ×1,5) */
+  plotUpgradeMult: 1.5,
+  // ---- Trộm kiểu "lượm" (trộm sạch nhưng mất thời gian) ----
+  /** Thời gian lượm cơ bản (giây) */
+  stealSecBase: 3,
+  /** Thêm mỗi sản phẩm (giây) — ô 6 cây ≈ 3 + 6×1.5 = 12 giây */
+  stealSecPerItem: 1.5,
+  /** Bắt vật nuôi: số giây này + giá con vật / 100 (gà ≈ 23s, bò ≈ 32s, cừu ≈ 40s) */
+  stealAnimalSec: 20,
+  // ---- Chó giữ nhà ----
+  /** Xác suất chó xông ra trong một lần trộm (0–1) */
+  dogCatchChance: 0.2,
+  /** Tiền phạt khi bị chó đuổi (xu, trả cho chủ vườn) */
+  dogFine: 30,
+  // ---- Tiệm thời trang ----
+  /** Giá đổi kiểu tóc / màu tóc / màu da (xu) */
+  salonHair: 200,
+  salonColor: 150,
+  salonSkin: 100,
+  /** Bán lại quần áo, vật phẩm: nhận lại tỉ lệ này của giá mua (0–1) */
+  resellRate: 0.5,
 };
 
 // ---- Bảng giá MẶC ĐỊNH: chỉ dùng để khởi tạo DB lần đầu. Sau đó DB là nguồn chính (game_crops, game_animals). ----
@@ -112,7 +160,7 @@ export function catalogSnapshot(): CatalogPayload {
 
 applyCatalog({ crops: DEFAULT_CROPS, animals: DEFAULT_ANIMALS, econ: { ...ECON } });
 
-const SLOT_ICON: Record<Slot, string> = { top: '👕', bottom: '👖', hat: '🎩', acc: '🕶️' };
+const SLOT_ICON: Record<Slot, string> = { top: '👕', bottom: '👖', hat: '🎩', acc: '🕶️', hand: '🎈', mouth: '🎺', ride: '🛹' };
 
 // [id, slot, tên, style, màu, màu phụ, giá, cấp]
 const CLOTHES: [string, Slot, string, string, string, string | null, number, number][] = [
@@ -150,12 +198,72 @@ const CLOTHES: [string, Slot, string, string, string, string | null, number, num
   ['scarf_red', 'acc', 'Khăn quàng đỏ', 'scarf', '#e63946', null, 250, 2],
   ['cape_red', 'acc', 'Áo choàng đỏ', 'cape', '#c1121f', null, 1200, 4],
   ['wings_angel', 'acc', 'Cánh thiên thần', 'wings', '#ffffff', '#cde7ff', 3000, 6],
+  ['tee_lime', 'top', 'Áo thun chanh', 'tee', '#b5e655', null, 120, 1],
+  ['hoodie_black', 'top', 'Hoodie đen', 'hoodie', '#3a3a4a', null, 450, 2],
+  ['stripe_red', 'top', 'Áo sọc đỏ', 'stripe', '#e05d5d', '#ffffff', 250, 1],
+  ['jacket_green', 'top', 'Áo khoác lính', 'jacket', '#5f7a3f', '#86a35c', 750, 3],
+  ['pants_white', 'bottom', 'Quần trắng', 'pants', '#efeff5', null, 200, 2],
+  ['shorts_blue', 'bottom', 'Quần short xanh', 'shorts', '#4f8fd6', null, 120, 1],
+  ['cat_ears', 'hat', 'Tai mèo', 'catears', '#2b2b2b', '#ff9ec7', 400, 2],
+  ['cap_black', 'hat', 'Mũ lưỡi trai đen', 'cap', '#2d2d38', null, 200, 1],
+  ['heart_glasses', 'acc', 'Kính trái tim', 'heartglasses', '#ff4d7e', null, 350, 2],
+  ['backpack', 'acc', 'Ba lô', 'backpack', '#f4a261', '#e76f51', 600, 3],
 ];
+
+// ---- Cửa hàng vật phẩm: cầm tay, ngậm, phương tiện ----
+// [id, slot, tên, style, màu, màu phụ, giá, cấp, tốc độ, mô tả]
+const GEAR: [string, Slot, string, string, string, string | null, number, number, number | null, string][] = [
+  ['balloon_red', 'hand', 'Bóng bay đỏ', 'balloon', '#ef476f', null, 120, 1, null, 'Bay lơ lửng theo bạn'],
+  ['balloon_blue', 'hand', 'Bóng bay xanh', 'balloon', '#4cc9f0', null, 120, 1, null, 'Bay lơ lửng theo bạn'],
+  ['balloon_heart', 'hand', 'Bóng bay trái tim', 'balloonheart', '#ff5d8f', null, 250, 1, null, 'Tặng người thương'],
+  ['icecream', 'hand', 'Cây kem', 'icecream', '#ffc8dd', '#f4a261', 100, 1, null, 'Mát lạnh ngày hè'],
+  ['cotton_candy', 'hand', 'Kẹo bông', 'cottoncandy', '#ffafcc', '#cdb4db', 180, 1, null, 'Bông xốp ngọt ngào'],
+  ['flag', 'hand', 'Lá cờ cổ vũ', 'flag', '#e63946', '#ffd166', 250, 2, null, 'Cổ vũ hết mình'],
+  ['teddy', 'hand', 'Gấu bông', 'teddy', '#c68b59', '#f2d0a9', 600, 2, null, 'Ôm là hết buồn'],
+  ['wand', 'hand', 'Đũa phép', 'wand', '#6c63ff', '#ffd166', 1500, 4, null, 'Lấp lánh ánh sao'],
+  ['guitar', 'hand', 'Đàn ghi-ta', 'guitar', '#d08c60', '#7f4f24', 2000, 5, null, 'Đệm hát cho cả xóm'],
+  ['chainsaw', 'hand', 'Máy cưa', 'chainsaw', '#f77f00', '#6c757d', 2500, 5, null, 'Ngầu nhất xóm'],
+  ['lollipop', 'mouth', 'Kẹo mút', 'lollipop', '#ff70a6', '#ffd670', 60, 1, null, 'Ngọt lịm'],
+  ['party_horn', 'mouth', 'Kèn sinh nhật', 'partyhorn', '#ffbe0b', '#3a86ff', 120, 1, null, 'Tò te tí te!'],
+  ['whistle', 'mouth', 'Còi', 'whistle', '#ced4da', null, 100, 1, null, 'Tuýt tuýt!'],
+  ['pacifier', 'mouth', 'Núm vú giả', 'pacifier', '#90e0ef', '#ff9ec7', 150, 1, null, 'Em bé của xóm'],
+  ['trumpet', 'mouth', 'Kèn trumpet', 'trumpet', '#ffd166', '#e09f3e', 900, 3, null, 'Thổi vang cả khu'],
+  ['rose_mouth', 'mouth', 'Hoa hồng ngậm', 'rose', '#d7263d', '#52b788', 500, 3, null, 'Lãng tử'],
+  ['skates', 'ride', 'Giày patin', 'skates', '#ff5d8f', '#ffd166', 1200, 2, 1.3, 'Đi nhanh ×1,3'],
+  ['skateboard', 'ride', 'Ván trượt', 'skateboard', '#3a86ff', '#ffbe0b', 2000, 3, 1.45, 'Đi nhanh ×1,45'],
+  ['bicycle', 'ride', 'Xe đạp', 'bicycle', '#2a9d8f', '#264653', 3500, 4, 1.7, 'Đi nhanh ×1,7'],
+  ['scooter', 'ride', 'Xe máy', 'scooter', '#e63946', '#f1faee', 9000, 7, 2.2, 'Đi nhanh ×2,2'],
+  ['car_red', 'ride', 'Ô tô mui trần đỏ', 'car', '#e63946', '#ffd166', 20000, 10, 2.6, 'Đi nhanh ×2,6'],
+  ['car_yellow', 'ride', 'Ô tô mui trần vàng', 'car', '#ffc300', '#3a86ff', 20000, 10, 2.6, 'Đi nhanh ×2,6'],
+];
+const GEAR_ICON: Record<string, string> = {
+  skates: '⛸️', skateboard: '🛹', bicycle: '🚲', scooter: '🛵', car: '🚗',
+  balloon: '🎈', balloonheart: '💗', icecream: '🍦', cottoncandy: '🍬', flag: '🚩', teddy: '🧸', wand: '✨', guitar: '🎸', chainsaw: '🔧',
+  lollipop: '🍭', partyhorn: '🥳', whistle: '📯', pacifier: '🍼', trumpet: '🎺', rose: '🌹',
+};
 for (const [id, slot, name, style, color, color2, price, level] of CLOTHES) {
   ITEMS[`cl:${id}`] = {
     id: `cl:${id}`, name, icon: SLOT_ICON[slot], kind: 'clothing', slot, style, color,
     color2: color2 ?? undefined, price, level,
   };
+}
+for (const [id, slot, name, style, color, color2, price, level, speed, desc] of GEAR) {
+  ITEMS[`cl:${id}`] = {
+    id: `cl:${id}`, name, icon: GEAR_ICON[style] ?? SLOT_ICON[slot], kind: 'clothing', slot, style, color,
+    color2: color2 ?? undefined, price, level, speed: speed ?? undefined, desc,
+  };
+}
+
+/** Giá bán lại quần áo / vật phẩm (đồ tặng kèm 0 xu thì không bán được). */
+export function resellPrice(itemId: string) {
+  const it = ITEMS[itemId];
+  if (!it || it.kind !== 'clothing' || !it.price) return 0;
+  return Math.floor(it.price * ECON.resellRate);
+}
+
+/** Hệ số tốc độ đi theo phương tiện đang dùng. */
+export function rideSpeed(a: { ride?: string | null } | null | undefined) {
+  return (a?.ride && ITEMS[a.ride]?.speed) || 1;
 }
 
 export const STARTER_ITEMS: Record<string, number> = {
@@ -171,7 +279,7 @@ export const STARTER_ITEMS: Record<string, number> = {
 
 export const SKINS = ['#ffe3cc', '#f9d0b0', '#eab38b', '#c98e66', '#8d5a3b'];
 export const HAIR_COLORS = ['#2b2b2b', '#5b3a29', '#a0522d', '#e0b04a', '#f2d68a', '#d94f70', '#6c63ff', '#3fb8af', '#ececec'];
-export const HAIR_STYLES = ['Ngắn', 'Dựng', 'Dài', 'Bob', 'Đuôi ngựa', 'Búi đôi'];
+export const HAIR_STYLES = ['Ngắn', 'Dựng', 'Dài', 'Bob', 'Đuôi ngựa', 'Búi đôi', 'Xoăn', 'Mào gà', 'Tết hai bên'];
 
 export interface Appearance {
   skin: number;
@@ -181,10 +289,14 @@ export interface Appearance {
   bottom: string;
   hat: string | null;
   acc: string | null;
+  /** Đồ cầm tay / ngậm / phương tiện (tài khoản cũ có thể chưa có) */
+  hand?: string | null;
+  mouth?: string | null;
+  ride?: string | null;
 }
 
 export const DEFAULT_APPEARANCE: Appearance = {
-  skin: 0, hair: 0, hairColor: 0, top: 'cl:tee_white', bottom: 'cl:pants_denim', hat: null, acc: null,
+  skin: 0, hair: 0, hairColor: 0, top: 'cl:tee_white', bottom: 'cl:pants_denim', hat: null, acc: null, hand: null, mouth: null, ride: null,
 };
 
 export function xpToNext(level: number) {
@@ -196,6 +308,11 @@ export const START_PLOTS = 6;
 export const MAX_ANIMALS = 8;
 export function plotPrice(currentCount: number) {
   return ECON.plotStep * (currentCount - 4);
+}
+
+/** Sản lượng một vụ trên ô đất: ô đã nâng cấp (lvl ≥ 1) được ×plotUpgradeMult, làm tròn. */
+export function plotYield(baseYield: number, lvl?: number) {
+  return lvl ? Math.max(baseYield, Math.round(baseYield * ECON.plotUpgradeMult)) : baseYield;
 }
 
 /** Số nông sản chủ vườn luôn giữ lại (không bị hái trộm): theo ECON.stealKeep (mặc định 60%), làm tròn lên. */

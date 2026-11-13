@@ -12,7 +12,7 @@ interface TableState {
   id: number; stake: number; hostId: number; playing: boolean; turn: number; turnEndsAt: number; now: number;
   current: { combo: Combo; seat: number } | null; mySeat: number; myHand: number[];
   seats: (SeatPub | null)[]; log: string[];
-  result: { winner: string; rows: { name: string; delta: number; left: number[] }[] } | null;
+  result: { winner: string; winnerSeat?: number; rows: { seat?: number; name: string; delta: number; left: number[]; cong?: boolean }[] } | null;
 }
 interface LobbyRow { id: number; stake: number; playing: boolean; count: number; host: string }
 
@@ -35,7 +35,7 @@ function playTableSounds(prev: TableState | null, t: TableState) {
   if (t.playing && t.turn === t.mySeat && (prev.turn !== t.turn || !prev.playing)) sfx('ding');
   if (t.result && !prev.result) {
     const me = useStore.getState().me?.name;
-    const row = t.result.rows.find((r) => me != null && r.name.startsWith(me));
+    const row = t.result.rows.find((r) => (r.seat != null ? r.seat === t.mySeat : me != null && r.name.startsWith(me)));
     sfx(row && row.delta > 0 ? 'win' : 'lose');
   }
 }
@@ -44,7 +44,7 @@ export function TienLenPanel() {
   const meId = useStore((s) => s.me?.id);
   const coins = useStore((s) => s.me?.coins ?? 0);
   const [lobby, setLobby] = useState<LobbyRow[]>([]);
-  const [stakes, setStakes] = useState<number[]>([100, 500, 1000, 5000]);
+  const [stakes, setStakes] = useState<number[]>([10, 50, 100, 500]);
   const [table, setTable] = useState<TableState | null>(null);
 
   useEffect(() => {
@@ -79,10 +79,10 @@ export function TienLenPanel() {
 
   if (!table) {
     const TIERS: Record<number, { name: string; color: string }> = {
-      100: { name: 'Bàn tập', color: '#4cc9f0' },
-      500: { name: 'Bình dân', color: '#06d6a0' },
-      1000: { name: 'Cao thủ', color: '#ef476f' },
-      5000: { name: 'VIP', color: '#ffb703' },
+      10: { name: 'Bàn tập', color: '#4cc9f0' },
+      50: { name: 'Bình dân', color: '#06d6a0' },
+      100: { name: 'Cao thủ', color: '#ef476f' },
+      500: { name: 'VIP', color: '#ffb703' },
     };
     const tier = (s: number) => TIERS[s] ?? { name: 'Bàn', color: '#9b72cf' };
     return (
@@ -96,17 +96,18 @@ export function TienLenPanel() {
             <button className="icon-btn arcade-close" onClick={close} aria-label="Đóng">✕</button>
           </div>
 
-          <div className="felt-section">Chọn mức bàn để mở bàn mới</div>
+          <div className="felt-section">Chọn mức bàn để mở bàn mới · thua trả theo số lá còn trên tay (cóng ×2)</div>
           <div className="stake-row">
             {stakes.map((s) => {
               const t = tier(s);
-              const enough = coins >= s * 2;
+              const need = s * 26; // thua cóng: 13 lá × 2
+              const enough = coins >= need;
               return (
                 <button key={s} className={`stake-chip ${enough ? '' : 'poor'}`} style={{ ['--chip' as string]: t.color }}
-                  onClick={() => call('tl:create', { stake: s })} title={enough ? `Mở bàn ${t.name}` : `Cần ít nhất ${fmt(s * 2)} xu`}>
-                  <span className="chip-coin"><b>{s >= 1000 ? `${s / 1000}K` : s}</b></span>
-                  <span className="chip-name">{t.name}</span>
-                  <small>{enough ? `cần ${fmt(s * 2)} xu` : `🔒 cần ${fmt(s * 2)} xu`}</small>
+                  onClick={() => call('tl:create', { stake: s })} title={enough ? `Mở bàn ${t.name}: ${s} xu mỗi lá` : `Cần ít nhất ${fmt(need)} xu`}>
+                  <span className="chip-coin"><b>{s}</b></span>
+                  <span className="chip-name">{t.name} · {s} xu/lá</span>
+                  <small>{enough ? `cần ${fmt(need)} xu` : `🔒 cần ${fmt(need)} xu`}</small>
                 </button>
               );
             })}
@@ -135,10 +136,10 @@ export function TienLenPanel() {
                       {[0, 1, 2, 3].map((i) => (
                         <span key={i} className={`seat s${i} ${i < t.count ? 'taken' : ''}`}>{i === 0 ? t.host.slice(0, 1).toUpperCase() : i < t.count ? '👤' : ''}</span>
                       ))}
-                      <span className="mini-chip" style={{ ['--chip' as string]: tr.color }}>{t.stake >= 1000 ? `${t.stake / 1000}K` : t.stake}</span>
+                      <span className="mini-chip" style={{ ['--chip' as string]: tr.color }}>{t.stake}</span>
                     </div>
                     <div className="mini-info">
-                      <b>Bàn #{t.id} · {tr.name}</b>
+                      <b>Bàn #{t.id} · {tr.name} · {t.stake} xu/lá</b>
                       <small>Chủ bàn: {t.host} · {t.count}/4 ghế</small>
                       <span className={`table-status ${t.playing ? 'busy' : full ? 'full' : 'open'}`}>
                         {t.playing ? '🔴 Đang chơi' : full ? '⚪ Đã đủ người' : '🟢 Chờ người'}
@@ -183,6 +184,8 @@ function TableView({ table, meId, onClose }: { table: TableState; meId: number; 
   const toggle = (c: number) => setSel((s) => (s.includes(c) ? s.filter((x) => x !== c) : [...s, c]));
   const play = async () => { const r = await call('tl:play', { cards: sel }); if (r.ok) setSel([]); };
 
+  // Kết quả ván vừa xong của từng ghế (bài còn lại + tiền)
+  const resultOf = (seat: number) => (table.result?.rows.find((r) => r.seat === seat) ?? null);
   // Sắp xếp vị trí: mình luôn ở dưới
   const rel = (i: number) => (i - Math.max(0, table.mySeat) + 4) % 4;
   const posName = ['bottom', 'right', 'top', 'left'];
@@ -193,9 +196,7 @@ function TableView({ table, meId, onClose }: { table: TableState; meId: number; 
       <div className="arcade-head">
         <button className="btn small felt-back" onClick={onClose} aria-label="Rời bàn">←<span className="back-label"> Rời bàn</span></button>
         <h2 className="neon">🃏 BÀN #{table.id}</h2>
-        <span className="mini-chip inline" style={{ ['--chip' as string]: table.stake >= 5000 ? '#ffb703' : table.stake >= 1000 ? '#ef476f' : table.stake >= 500 ? '#06d6a0' : '#4cc9f0' }}>
-          {table.stake >= 1000 ? `${table.stake / 1000}K` : table.stake}
-        </span>
+        <span className="tl-stake-pill" title="Người thua trả số xu này cho mỗi lá còn trên tay">💰 {table.stake} xu/lá</span>
         <GameChatButton />
         <span className="arcade-coins">💰 {fmt(myCoins)} xu</span>
       </div>
@@ -214,9 +215,10 @@ function TableView({ table, meId, onClose }: { table: TableState; meId: number; 
                     {s.passed && table.playing && <div className="tl-passed">Bỏ lượt</div>}
                   </div>
                   {table.playing && table.turn === i && <TimerBar endsAt={table.turnEndsAt} offset={offset} max={s.kind === 'bot' ? 1.5 : 20} />}
-                  {isHost && !table.playing && s.kind === 'bot' && (
+                  {isHost && !table.playing && s.kind === 'bot' && !resultOf(i) && (
                     <button className="btn tiny danger" onClick={() => call('tl:removeBot', { seat: i })}>Bỏ bot</button>
                   )}
+                  {!table.playing && resultOf(i) && <SeatReveal row={resultOf(i)!} stake={table.stake} />}
                 </>
               ) : (
                 <div className="tl-empty">
@@ -241,23 +243,17 @@ function TableView({ table, meId, onClose }: { table: TableState; meId: number; 
           ) : (
             <div className="tl-waiting">
               {table.result ? (
-                <div className="tl-result">
-                  <h3>🏆 {table.result.winner} thắng!</h3>
-                  {table.result.rows.map((r, i) => (
-                    <div key={i} className="tl-result-row">
-                      <span>{r.name}</span>
-                      <b className={r.delta >= 0 ? 'pos' : 'neg'}>{r.delta >= 0 ? '+' : ''}{fmt(r.delta)}</b>
-                      <span className="left-cards">{r.left.map((c) => <Card key={c} c={c} small />)}</span>
-                    </div>
-                  ))}
+                <div className="tl-win-banner">
+                  <b>🏆 {table.result.winner} thắng <span className="tl-win-pot">+{fmt(table.result.rows[0]?.delta ?? 0)} xu</span></b>
+                  <small>{table.stake} xu × số lá còn lại · cóng ×2</small>
                 </div>
               ) : table.current ? <p>⏳ Đang tính tiền…</p>
                 : <p>{isHost ? 'Cần ít nhất 2 người · bấm "+ Bot" ở ghế trống' : 'Đang chờ chủ bàn bắt đầu…'}</p>}
               <div className="tl-end-actions">
                 {isHost
-                  ? <button className="play-btn big" onClick={() => call('tl:start')}>▶ {table.result ? 'CHƠI LẠI' : 'BẮT ĐẦU VÁN'}</button>
+                  ? <button className="play-btn big tl-end-btn" onClick={() => call('tl:start')}>▶ {table.result ? 'CHƠI LẠI' : 'BẮT ĐẦU VÁN'}</button>
                   : table.result && <p className="hint">Chờ chủ bàn bắt đầu ván mới…</p>}
-                {table.result && <button className="btn felt-back" onClick={onClose}>🚪 Thoát bàn</button>}
+                {table.result && <button className="btn felt-back tl-end-btn ghost" onClick={onClose}>🚪 THOÁT BÀN</button>}
               </div>
             </div>
           )}
@@ -266,9 +262,10 @@ function TableView({ table, meId, onClose }: { table: TableState; meId: number; 
 
       <div className={`tl-me ${myTurn ? 'turn' : ''}`}>
         {myTurn && <TimerBar endsAt={table.turnEndsAt} offset={offset} max={20} />}
+        {!table.playing && resultOf(table.mySeat) && resultOf(table.mySeat)!.left.length > 0 && <SeatReveal row={resultOf(table.mySeat)!} stake={table.stake} mine />}
         <div className="tl-hand">
           {table.myHand.map((c) => <Card key={c} c={c} selected={sel.includes(c)} onClick={() => toggle(c)} />)}
-          {!table.playing && table.myHand.length === 0 && <span className="hint">Bài của bạn sẽ hiện ở đây</span>}
+          {!table.playing && table.myHand.length === 0 && !table.result && <span className="hint">Bài của bạn sẽ hiện ở đây</span>}
         </div>
         {table.playing && (
           <div className="tl-actions">
@@ -291,4 +288,21 @@ function TimerBar({ endsAt, offset, max }: { endsAt: number; offset: number; max
   const remain = Math.max(0, (endsAt - (now + offset)) / 1000);
   const pct = Math.max(0, Math.min(100, (remain / max) * 100));
   return <div className="timer-bar"><div style={{ width: `${pct}%`, background: pct < 30 ? '#ef476f' : '#06d6a0' }} /></div>;
+}
+
+/** Lật bài ngay cạnh ghế khi hết ván: số xu + dải bài mini xếp chồng. */
+function SeatReveal({ row, stake, mine }: { row: { delta: number; left: number[]; cong?: boolean }; stake: number; mine?: boolean }) {
+  const win = row.left.length === 0;
+  if (win) return <div className="tl-reveal win"><b>🏆 +{fmt(row.delta)}</b></div>;
+  return (
+    <div className={`tl-reveal lose ${mine ? 'mine' : ''}`} title={`Còn ${row.left.length} lá × ${stake} xu${row.cong ? ' × 2 (cóng)' : ''}`}>
+      <b>−{fmt(Math.abs(row.delta))}</b>
+      <small>{row.cong ? 'Cóng · ' : ''}{row.left.length} lá</small>
+      {!mine && (
+        <span className="tl-mini-cards">
+          {row.left.map((c) => <i key={c} className={suitOf(c) >= 2 ? 'red' : ''}>{RANKS[rankOf(c)]}<em>{SUITS[suitOf(c)]}</em></i>)}
+        </span>
+      )}
+    </div>
+  );
 }

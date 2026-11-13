@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { ANIMALS, CROPS, ITEMS, MAX_ANIMALS, MAX_PLOTS, plotPrice, stealFloor } from '../../../shared/catalog';
+import { ANIMALS, CROPS, ECON, ITEMS, MAX_ANIMALS, MAX_PLOTS, plotPrice } from '../../../shared/catalog';
 import {
   animalPos, FUN_PLAZA, FARM_FENCE, FARM_HOUSE, FARM_POND, GARDEN, GARDEN2, PEN, PLOT_H, PLOT_W, plotPos, ZONES, zoneDefOf,
 } from '../../../shared/zones';
@@ -61,6 +61,13 @@ export class WorldScene extends Phaser.Scene {
   pendingZone: ZoneInfo | null = null;
   nav: NavGrid | null = null;
   dog: Phaser.GameObjects.Image | null = null;
+  /** Cảnh sát tuần tra đang có mặt ở nông trại này */
+  police: PlayerSprite | null = null;
+  /** Thanh tiến trình "đang lượm trộm" trên đầu từng kẻ trộm */
+  stealBars = new Map<number, { g: Phaser.GameObjects.Container; tween: Phaser.Tweens.Tween }>();
+  /** Mình đang lượm trộm */
+  stealing = false;
+  policeTimer: Phaser.Time.TimerEvent | null = null;
   dogTween: Phaser.Tweens.Tween | null = null;
   dogChasing = false;
   plotHint: Phaser.GameObjects.Text | null = null;
@@ -91,6 +98,12 @@ export class WorldScene extends Phaser.Scene {
       netBus.on('appearance', ({ id, appearance }) => this.players.get(id)?.setAppearance(appearance)),
       netBus.on('farm', () => this.updateFarm()),
       netBus.on('farm:dogchase', (d) => this.onDogChase(d)),
+      netBus.on('police:arrive', () => this.policeArrive(true)),
+      netBus.on('police:leave', () => this.policeLeave()),
+      netBus.on('police:arrest', ({ thiefId }) => this.policeArrest(thiefId)),
+      netBus.on('player:jail', ({ id, jailed }) => this.players.get(id)?.setJailed(jailed)),
+      netBus.on('steal:begin', (d) => this.onStealBegin(d)),
+      netBus.on('steal:end', (d) => this.onStealEnd(d)),
       netBus.on('travel', (target: string) => this.travel(target)),
     );
     this.events.once('shutdown', () => this.unsub.forEach((u) => u()));
@@ -112,9 +125,18 @@ export class WorldScene extends Phaser.Scene {
     const cam = this.cameras.main;
     // Luôn khớp camera với kích thước canvas (tránh bị cắt mất một phần khi đổi cỡ cửa sổ).
     cam.setSize(this.scale.width, this.scale.height);
-    let zoom = (w < 700 ? 0.62 : w < 1100 ? 0.84 : 0.94) * DPR;
-    // Màn hình rộng/cao hơn bản đồ → phóng to vừa đủ để bản đồ phủ kín, không lộ nền trống.
+    const h = this.scale.height / DPR;
+    // Theo cả chiều rộng lẫn chiều cao: màn thấp (điện thoại xoay ngang) thu nhỏ hơn để thấy trọn toà nhà
+    const zw = w < 700 ? 0.62 : w < 1100 ? 0.84 : 0.94;
+    const zh = h < 480 ? 0.6 : h < 640 ? 0.8 : 0.94;
+    let zoom = Math.min(zw, zh) * DPR;
     const def = this.zone && zoneDefOf(this.zone.zone);
+    // Khu vui chơi: luôn thấy trọn dãy nhà (từ mái ~y120 tới vỉa hè ~y900), camera nhìn lệch lên trên nhân vật
+    if (def?.id === 'fun') {
+      zoom = Math.min(zoom, this.scale.height / 820);
+      cam.setFollowOffset(0, 300);
+    } else cam.setFollowOffset(0, 0);
+    // Màn hình rộng/cao hơn bản đồ → phóng to vừa đủ để bản đồ phủ kín, không lộ nền trống.
     if (def) zoom = Math.max(zoom, this.scale.width / def.w, this.scale.height / def.h);
     cam.setZoom(zoom);
     if (this.vignette) {
@@ -135,6 +157,10 @@ export class WorldScene extends Phaser.Scene {
     this.plotViews = [];
     this.animalViews = [];
     this.dog = null;
+    this.police = null;
+    this.policeTimer = null;
+    this.stealBars.clear();
+    this.stealing = false;
     this.dogTween = null;
     this.dogChasing = false;
     this.ferris = null;
@@ -176,11 +202,135 @@ export class WorldScene extends Phaser.Scene {
     if (this.me) {
       cam.startFollow(this.me, true, 0.1, 0.1);
       cam.setDeadzone(90, 60);
-      cam.centerOn(this.me.x, this.me.y);
+      this.fitCamera(); // startFollow đặt lại độ lệch camera → áp lại
+      cam.centerOn(this.me.x, this.me.y - cam.followOffset.y);
     }
     cam.fadeIn(350, 127, 191, 95);
 
     if (byBus && def.busStop && this.me) this.arriveByBus(def.busStop);
+    if (z.kind === 'farm' && z.police && z.police.until > Date.now()) this.policeArrive(false);
+  }
+
+  // ---------------------------------------------------------------- Trộm kiểu "lượm"
+
+  /** Đi tới chỗ cần trộm rồi bắt đầu lượm (server tính thời gian, chủ được báo). */
+  async startSteal(kind: 'plot' | 'produce' | 'animal', idx: number, x: number, y: number) {
+    if (this.stealing) return toast('Bạn đang lượm dở rồi');
+    await this.walkMe(x, y);
+    const r = await call('steal:start', { owner: this.zone!.ownerId, kind, idx });
+    if (!r.ok || r.police) return;
+    this.stealing = true;
+    toast(`😈 Đang ${kind === 'animal' ? 'bắt' : 'lượm'}… đứng yên khoảng ${Math.ceil(r.ms / 1000)} giây (đi chỗ khác là bỏ dở)`);
+  }
+
+  onStealBegin({ thiefId, endsAt, ms }: { thiefId: number; endsAt: number; ms: number }) {
+    const sp = this.players.get(thiefId);
+    if (!sp) return;
+    this.stealBars.get(thiefId)?.g.destroy();
+    const W = 70;
+    const top = sp.label.y - 22;
+    const bg = this.add.rectangle(0, 0, W + 4, 10, 0x2b2d42, 0.85).setStrokeStyle(2, 0xffffff);
+    const fill = this.add.rectangle(-W / 2, 0, W, 6, 0xff6b8b).setOrigin(0, 0.5).setScale(0, 1);
+    const icon = art.emoji(this, -W / 2 - 14, 0, '😈', 16);
+    const g = this.add.container(0, top, [bg, fill, icon]);
+    // Chủ vườn đang ở đây: nút "Đuổi" ngay trên đầu kẻ trộm
+    if (this.isOwner()) {
+      const btn = art.text(this, 0, -24, '🏃 Đuổi đi!', 15, '#ffffff', { stroke: '#9d0208', strokeThickness: 5 })
+        .setInteractive({ useHandCursor: true });
+      btn.on('pointerdown', () => call('steal:chase', { thiefId }));
+      g.add(btn);
+      sfx('error');
+    }
+    sp.add(g);
+    const left = Math.max(200, endsAt - (Date.now() + (get().timeOffset ?? 0)));
+    fill.setScale(Math.max(0, 1 - left / ms), 1);
+    const tween = this.tweens.add({ targets: fill, scaleX: 1, duration: left, ease: 'Linear' });
+    this.stealBars.set(thiefId, { g, tween });
+  }
+
+  onStealEnd({ thiefId, ok, reason, item, qty, text }: { thiefId: number; ok: boolean; reason?: string; item?: string; qty?: number; text?: string }) {
+    const bar = this.stealBars.get(thiefId);
+    if (bar) { bar.tween.stop(); bar.g.destroy(); this.stealBars.delete(thiefId); }
+    const sp = this.players.get(thiefId);
+    if (thiefId === get().me?.id) {
+      this.stealing = false;
+      if (ok && sp) {
+        sfx('harvest');
+        this.flyToBag(sp.x, sp.y - 60, item ? ITEMS[item]?.icon ?? '🎁' : '🐾', Math.min(qty ?? 1, 6));
+        this.floatText(sp.x, sp.y - 90, `+${text} 😈`, '#ffd6e8');
+      }
+    } else if (sp && !ok && reason === 'chased') {
+      sp.say('😱 Chạy thôi!');
+    }
+  }
+
+  // ---------------------------------------------------------------- Cảnh sát tuần tra
+
+  /** Cảnh sát xuất hiện: đi bộ vào từ trạm xe buýt (hoặc đã có mặt sẵn khi mình vừa tới). */
+  policeArrive(fromGate: boolean) {
+    if (this.zone?.kind !== 'farm' || this.police) return;
+    const def = zoneDefOf(this.zone.zone)!;
+    const start = fromGate && def.busStop ? { x: def.busStop.x, y: def.busStop.y } : { x: 900, y: 700 };
+    const cop = new PlayerSprite(this, {
+      id: -1, name: 'Cảnh sát', level: 99, x: start.x, y: start.y,
+      appearance: { skin: 2, hair: 0, hairColor: 0, top: 'cl:jacket_denim', bottom: 'cl:pants_black', hat: 'cl:cap_blue', acc: 'cl:sunglasses' },
+    }, false, '👮 Cảnh sát tuần tra');
+    cop.disableInteractive();
+    cop.label.setColor('#bde0fe');
+    this.police = cop;
+    this.objs.push(cop);
+    if (fromGate) {
+      sfx('error');
+      cop.say('🚨 Kiểm tra an ninh khu vực!');
+      toast('🚨 Cảnh sát đang tuần tra nông trại này!', 'info');
+    }
+    this.policeWander();
+  }
+
+  private policeWander() {
+    const cop = this.police;
+    if (!cop || !cop.active) return;
+    const tx = 260 + Math.random() * 1200, ty = 420 + Math.random() * 760;
+    const pts = this.nav ? this.nav.findPath(cop.x, cop.y, tx, ty) : [[tx, ty] as [number, number]];
+    const step = (i: number) => {
+      if (this.police !== cop || !cop.active) return;
+      if (i >= pts.length) {
+        this.policeTimer = this.time.delayedCall(1500 + Math.random() * 2500, () => this.policeWander());
+        return;
+      }
+      cop.walkTo(pts[i][0], pts[i][1], () => step(i + 1));
+    };
+    step(0);
+  }
+
+  /** Cảnh sát rời đi: đi về trạm xe buýt rồi biến mất. */
+  policeLeave() {
+    const cop = this.police;
+    if (!cop) return;
+    this.police = null;
+    this.policeTimer?.remove();
+    const def = this.zone && zoneDefOf(this.zone.zone);
+    const exit = def?.busStop ?? { x: cop.x, y: cop.y + 200 };
+    cop.walkTo(exit.x, exit.y, () => {
+      this.tweens.add({ targets: cop, alpha: 0, duration: 400, onComplete: () => cop.destroy() });
+    });
+  }
+
+  /** Cảnh sát bắt kẻ trộm: chạy tới, còi hú, còng tay. */
+  policeArrest(thiefId: number) {
+    const thief = this.players.get(thiefId);
+    if (!thief) return;
+    if (!this.police) this.policeArrive(false);
+    const cop = this.police!;
+    this.policeTimer?.remove();
+    sfx('error');
+    cop.say('🚨 Đứng lại! Bắt quả tang!');
+    cop.walkTo(thief.x + 40, thief.y, () => {
+      const cuff = art.transient(this, art.text(this, thief.x, thief.y - 130, '🚔 BỊ BẮT!', 22, '#ffffff', { stroke: '#9d0208', strokeThickness: 6 }).setDepth(9999));
+      this.tweens.add({ targets: cuff, y: cuff.y - 24, alpha: 0, delay: 1200, duration: 600, onComplete: () => cuff.destroy() });
+      thief.say('😭 Em xin lỗi…');
+      this.policeTimer = this.time.delayedCall(2500, () => this.policeWander());
+    });
   }
 
   addPlayer(p: PlayerPub) {
@@ -193,14 +343,31 @@ export class WorldScene extends Phaser.Scene {
 
   moveMe(x: number, y: number) {
     if (!this.me || !this.zone || this.traveling || this.arriving) return;
+    if (this.stealing) { this.stealing = false; send('steal:cancel'); toast('Bạn đã bỏ dở, không lấy được gì'); }
     const def = zoneDefOf(this.zone.zone)!;
     const tx = Phaser.Math.Clamp(x, 20, def.w - 20);
     const ty = Phaser.Math.Clamp(y, 60, def.h - 10);
     this.walkRoute(tx, ty, (fx, fy) => {
       const portal = def.portals.find((pt) => fx >= pt.x && fx <= pt.x + pt.w && fy >= pt.y && fy <= pt.y + pt.h);
       if (portal) {
+        const back = () => {
+          // Không qua được: lùi ra khỏi cổng để khỏi đứng kẹt ở đó
+          const cx = def.w / 2, cy = def.h / 2;
+          const d = Math.hypot(cx - fx, cy - fy) || 1;
+          this.walkRoute(fx + ((cx - fx) / d) * 140, fy + ((cy - fy) / d) * 140, () => {});
+        };
+        const jail = get().me?.jailUntil;
+        if (jail && jail > Date.now() && portal.to !== 'park') {
+          toast(`🧹 Bạn đang lao động công ích ở Công viên — còn ${Math.ceil((jail - Date.now()) / 60000)} phút nữa mới được đi`, 'error');
+          back();
+          return;
+        }
         this.cameras.main.fadeOut(200, 127, 191, 95);
-        call('zone:join', { zone: portal.to, via: 'walk' });
+        call('zone:join', { zone: portal.to, via: 'walk' }).then((r) => {
+          if (r.ok) return;
+          this.cameras.main.fadeIn(250, 127, 191, 95); // bị từ chối: làm sáng lại màn hình
+          back();
+        });
       }
     });
   }
@@ -599,7 +766,6 @@ export class WorldScene extends Phaser.Scene {
     const farm = get().farm;
     if (!farm || !this.plotViews.length) return;
     const owner = this.isOwner();
-    const meId = get().me?.id ?? -1;
     if (this.dog && !!farm.dog !== this.dog.visible) {
       this.dog.setVisible(!!farm.dog);
       if (farm.dog) this.dogWander();
@@ -635,9 +801,8 @@ export class WorldScene extends Phaser.Scene {
             this.tweens.add({ targets: v.crop, scale: 1, alpha: 1, duration: 340, ease: 'Sine.easeOut' });
             v.cropKey = cropKey;
           }
-          const c = CROPS[pl.crop];
           if (st === 3) {
-            const canSteal = !owner && !pl.stolenBy.includes(meId) && pl.yieldLeft > stealFloor(c.yield);
+            const canSteal = !owner && pl.yieldLeft > 0;
             status = owner ? '✨' : canSteal ? '🖐️' : '';
           } else {
             if (canWater(pl)) status = '💧';
@@ -648,6 +813,10 @@ export class WorldScene extends Phaser.Scene {
           }
         }
       }
+      // Đất màu mỡ: đất sẫm, ấm hơn
+      const tint = pl?.lvl ? 0xc98a4a : 0xffffff;
+      if (v.soil.tintTopLeft !== tint) { if (pl?.lvl) v.soil.setTint(tint); else v.soil.clearTint(); }
+      if (pl?.lvl && !status && !lock) status = '✨';
       setTxt(v.status, status);
       if (lock) { if (v.lock.y !== lockY) v.lock.setY(lockY); if (v.lock.style.fontSize !== `${lockSize}px`) v.lock.setFontSize(lockSize); }
       setTxt(v.lock, lock);
@@ -679,7 +848,7 @@ export class WorldScene extends Phaser.Scene {
       if (remain < 0) setTxt(v.status, owner ? '🌾' : '');
       else if (remain === 0) {
         // Chủ: biểu tượng sản phẩm để thu; khách: 🖐️ nếu còn lấy trộm được
-        const canSteal = !owner && !(an.stolenBy ?? []).includes(meId) && (an.left ?? def.qty) > stealFloor(def.qty);
+        const canSteal = !owner && (an.left ?? def.qty) > 0;
         setTxt(v.status, owner ? ITEMS[def.product].icon : canSteal ? '🖐️' : '');
       }
       else {
@@ -720,6 +889,21 @@ export class WorldScene extends Phaser.Scene {
       confirmBox(`Mở thêm 1 ô đất với giá ${fmt(price)} xu?`, () => call('farm:buyPlot'));
       return;
     }
+    // Công cụ "Nâng đất": biến ô thành Đất màu mỡ (sản lượng ×1,5)
+    if (owner && get().farmTool === 'upgrade') {
+      if (farm.plots.length < MAX_PLOTS) return toast(`Cần mở hết ${MAX_PLOTS} ô đất mới nâng cấp được (đang có ${farm.plots.length})`);
+      if (pl.lvl) return toast('✨ Ô này đã là Đất màu mỡ rồi');
+      if ((get().me?.level ?? 0) < ECON.plotUpgradeLevel) return toast(`Cần cấp ${ECON.plotUpgradeLevel} để nâng cấp đất`);
+      const mult = String(ECON.plotUpgradeMult).replace('.', ',');
+      confirmBox(`Nâng ô đất này thành ✨ Đất màu mỡ (sản lượng ×${mult}) với giá ${fmt(ECON.plotUpgradePrice)} xu?`, async () => {
+        const r = await call('farm:upgradePlot', { plot: i });
+        if (r.ok) {
+          sfx('levelup'); art.farmParticles(this, x, y, 'harvest');
+          this.floatText(x, y - 38, r.boosted ? `✨ Đất màu mỡ · vụ này ×${mult}!` : '✨ Đất màu mỡ!', '#fff3b0');
+        }
+      });
+      return;
+    }
     if (!pl.crop) {
       if (!owner) return toast('Ô đất trống');
       const tool = get().farmTool;
@@ -736,9 +920,7 @@ export class WorldScene extends Phaser.Scene {
         const r = await call('farm:harvest', { plot: i });
         if (r.ok) { sfx('harvest'); art.farmParticles(this, x, y - 10, 'harvest'); this.flyToBag(x, y - 20, ITEMS[r.item].icon, r.qty); this.floatText(x, y - 38, `+${r.qty} ${ITEMS[r.item].icon}  +${r.xp}xp`, '#fff3b0'); }
       } else {
-        const r = await call('farm:steal', { owner: ownerId, plot: i });
-        if (r.ok && r.caught) toast(`🐕 Bị chó đuổi! Mất ${r.fine} xu tiền phạt`, 'error');
-        else if (r.ok) { sfx('harvest'); this.flyToBag(x, y - 20, ITEMS[r.item].icon, 1); this.floatText(x, y - 30, `+1 ${ITEMS[r.item].icon} 😈`, '#ffd6e8'); }
+        await this.startSteal('plot', i, x, y + 30);
       }
       return;
     }
@@ -785,14 +967,14 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
     if (!owner) {
-      // Khách: lấy trộm sản phẩm khi vật nuôi đã có
-      if (animalRemainMs(an) !== 0) return toast(`${ANIMALS[an.type].name} của ${this.zone?.ownerName} chưa có gì để lấy`);
-      const r = await call('farm:stealAnimal', { owner: this.zone!.ownerId, idx: i });
-      if (r.ok && r.caught) toast(`🐕 Bị chó đuổi! Mất ${r.fine} xu tiền phạt`, 'error');
-      else if (r.ok) {
-        sfx('harvest');
-        this.flyToBag(v.icon.x, v.icon.y - 40, ITEMS[r.item].icon, 1);
-        this.floatText(v.icon.x, v.icon.y - 60, `+1 ${ITEMS[r.item].icon} 😈`, '#ffd6e8');
+      // Khách: sản phẩm đã có → lượm trộm cả lứa; chưa có → bắt trộm luôn con vật (lâu hơn)
+      const def = ANIMALS[an.type];
+      if (animalRemainMs(an) === 0 && (an.left ?? def.qty) > 0) {
+        await this.startSteal('produce', i, v.icon.x, v.icon.y + 20);
+      } else {
+        const sec = Math.round(ECON.stealAnimalSec + def.price / 100);
+        confirmBox(`Bắt trộm con ${def.icon} ${def.name} của ${this.zone?.ownerName}? Mất khoảng ${sec} giây đứng bắt — dễ bị chủ, chó hoặc cảnh sát phát hiện!`,
+          () => this.startSteal('animal', i, v.icon.x, v.icon.y + 20));
       }
       return;
     }

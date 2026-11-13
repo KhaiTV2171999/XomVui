@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Appearance, HAIR_COLORS, HAIR_STYLES, ITEMS, SKINS, Slot } from '../../../shared/catalog';
+import { Appearance, FASHION_SLOTS, HAIR_COLORS, HAIR_STYLES, ITEMS, SKINS, Slot } from '../../../shared/catalog';
 import { call } from '../net';
 import { get, set, toast, useStore } from '../store';
 import { AvatarPreview, Modal, Tabs } from './common';
@@ -9,7 +9,8 @@ type Tab = 'body' | 'hair' | Slot;
 export function WardrobeEditor({ onSaved, saveLabel = 'Lưu trang phục' }: { onSaved?: () => void; saveLabel?: string }) {
   const me = useStore((s) => s.me)!;
   const [a, setA] = useState<Appearance>(me.appearance);
-  const [tab, setTab] = useState<Tab>('body');
+  // Tóc, màu da: tự chọn khi tạo nhân vật; sau đó ra Tiệm thời trang để làm tóc
+  const [tab, setTab] = useState<Tab>(me.created ? 'top' : 'body');
   const [busy, setBusy] = useState(false);
 
   const owned = (slot: Slot) => Object.keys(me.inventory).filter((id) => ITEMS[id]?.kind === 'clothing' && ITEMS[id].slot === slot);
@@ -33,14 +34,15 @@ export function WardrobeEditor({ onSaved, saveLabel = 'Lưu trang phục' }: { o
       )}
       {owned(slot).map((id) => (
         <button key={id} className={`swatch-item ${a[slot] === id ? 'selected' : ''}`} onClick={() => setA({ ...a, [slot]: id })}>
-          <span className="color-dot" style={{ background: ITEMS[id].color }} />
+          {['hand', 'mouth', 'ride'].includes(slot) ? <span className="big-emoji">{ITEMS[id].icon}</span> : <span className="color-dot" style={{ background: ITEMS[id].color }} />}
           <span>{ITEMS[id].name}</span>
         </button>
       ))}
       {me.created && (
         <button className="swatch-item ghost" onClick={() => {
-          if (get().zone?.kind === 'fun') set({ panel: 'shop', shopTab: 'clothing' });
-          else toast('Ghé Cửa hàng ở Khu vui chơi để mua thêm quần áo 🛍️');
+          const fashion = FASHION_SLOTS.includes(slot);
+          if (get().zone?.kind === 'fun') set({ panel: fashion ? 'boutique' : 'shop' });
+          else toast(fashion ? 'Ghé Tiệm thời trang ở Khu vui chơi để mua thêm 👗' : 'Ghé Cửa hàng ở Khu vui chơi để mua thêm 🛒');
         }}>
           <span className="big-emoji">🛍️</span><span>Mua thêm</span>
         </button>
@@ -55,7 +57,11 @@ export function WardrobeEditor({ onSaved, saveLabel = 'Lưu trang phục' }: { o
         <button className="btn primary big" onClick={save} disabled={busy}>{saveLabel}</button>
       </div>
       <div className="wardrobe-options">
-        <Tabs<Tab> value={tab} onChange={setTab} tabs={[['body', '🙂 Da'], ['hair', '💇 Tóc'], ['top', '👕 Áo'], ['bottom', '👖 Quần'], ['hat', '🎩 Mũ'], ['acc', '🕶️ Phụ kiện']]} />
+        <Tabs<Tab> value={tab} onChange={setTab} tabs={[
+          ...(me.created ? [] : [['body', '🙂 Da'], ['hair', '💇 Tóc']] as [Tab, string][]),
+          ['top', '👕 Áo'], ['bottom', '👖 Quần'], ['hat', '🎩 Mũ'], ['acc', '🕶️ Phụ kiện'],
+          ...(me.created ? [['hand', '🎈 Cầm tay'], ['mouth', '🎺 Ngậm'], ['ride', '🛵 Xe']] as [Tab, string][] : []),
+        ]} />
         {tab === 'body' && (
           <div className="swatches">
             {SKINS.map((c, i) => (
@@ -86,6 +92,9 @@ export function WardrobeEditor({ onSaved, saveLabel = 'Lưu trang phục' }: { o
         {tab === 'bottom' && slotItems('bottom', false)}
         {tab === 'hat' && slotItems('hat', true)}
         {tab === 'acc' && slotItems('acc', true)}
+        {tab === 'hand' && slotItems('hand', true)}
+        {tab === 'mouth' && slotItems('mouth', true)}
+        {tab === 'ride' && slotItems('ride', true)}
       </div>
     </div>
   );
@@ -93,7 +102,7 @@ export function WardrobeEditor({ onSaved, saveLabel = 'Lưu trang phục' }: { o
 
 export function WardrobePanel() {
   return (
-    <Modal title="👗 Tiệm thời trang · Thay đồ" onClose={() => set({ panel: null })} wide>
+    <Modal title="🪞 Thay đồ" onClose={() => set({ panel: null })} wide>
       <WardrobeEditor onSaved={() => set({ panel: null })} />
     </Modal>
   );

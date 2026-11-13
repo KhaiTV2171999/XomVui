@@ -2,6 +2,7 @@ import { randomInt } from 'node:crypto';
 import type { Socket } from 'socket.io';
 import { addCoins, GameError } from '../db';
 import { getIo, handle, online, OnlinePlayer, pushMe } from './online';
+import { questBump } from './quests';
 
 // 0 Bầu, 1 Cua, 2 Tôm, 3 Cá, 4 Gà, 5 Nai
 export const BC_CHIPS = [10, 50, 100, 500, 1000, 5000];
@@ -148,6 +149,7 @@ export function registerBauCua(socket: Socket, p: OnlinePlayer) {
     const total = bets.reduce((x, y) => x + y, 0);
     if (total + a > MAX_PER_ROUND) throw new GameError(`Tối đa ${MAX_PER_ROUND.toLocaleString('vi')} xu mỗi ván`);
     const round = st.round;
+    questBump(uid, 'play', 1, `bc${round}`);
     await addCoins(uid, -a); // ném lỗi "Không đủ xu" nếu thiếu
     if (st.phase !== 'betting' || st.round !== round) {
       // Vòng đã chuyển sang lắc trong lúc chờ DB → hoàn lại tiền

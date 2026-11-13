@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { Appearance } from '../../../shared/catalog';
-import { ITEMS } from '../../../shared/catalog';
+import { ITEMS, OPTIONAL_SLOTS } from '../../../shared/catalog';
 import { call, travel } from '../net';
 import { confirmBox, openChat, set, toast, useStore } from '../store';
 import { AvatarPreview, Modal } from './common';
+import { openGift } from './GiftDialog';
 
 const ZONE_NAMES: Record<string, string> = { park: 'Công viên', fun: 'Khu vui chơi' };
 function zoneLabel(z: string | null | undefined) {
@@ -56,6 +57,7 @@ export function FriendsPanel() {
           <span className="friend-name">{f.name} <small>Lv{f.level} {f.online ? `· ${zoneLabel(f.zone)}` : '· offline'}</small></span>
           <button className="btn small" title="Thăm nông trại" onClick={() => goFarm(f.id)}>🌾 Thăm vườn</button>
           <button className="btn small" title="Nhắn tin" onClick={() => openChat(f.id, f.name)}>💬{unread[f.id] ? ` ${unread[f.id]}` : ''}</button>
+          <button className="btn small" title="Tặng quà" onClick={() => openGift(f.id, f.name)}>🎁</button>
           <button className="btn small danger" title="Huỷ kết bạn" onClick={() => confirmBox(`Huỷ kết bạn với ${f.name}?`, () => call('friend:remove', { userId: f.id }))}>✕</button>
         </div>
       ))}
@@ -78,7 +80,7 @@ export function PlayerCard() {
         <div className="pc-info">
           <div className="lv-badge">Cấp {p.level}</div>
           <div className="pc-outfit">
-            {[p.appearance.top, p.appearance.bottom, p.appearance.hat, p.appearance.acc].filter(Boolean).map((i) => (
+            {[p.appearance.top, p.appearance.bottom, p.appearance.hat, p.appearance.acc, p.appearance.hand, p.appearance.mouth, p.appearance.ride].filter(Boolean).map((i) => (
               <span key={i!} className="chip">{ITEMS[i!]?.name}</span>
             ))}
           </div>
@@ -90,6 +92,7 @@ export function PlayerCard() {
                 if (r.ok) { toast(r.accepted ? 'Đã trở thành bạn bè 🤝' : 'Đã gửi lời mời 💌', 'success'); setP({ ...p, friend: r.accepted ? 'accepted' : 'pending' }); }
               }}>➕ Kết bạn</button>}
             <button className="btn" onClick={() => goFarm(p.id)}>🌾 Thăm nông trại</button>
+            <button className="btn" onClick={() => (p.friend === 'accepted' ? openGift(p.id, p.name) : toast('Kết bạn trước để tặng quà nhé'))}>🎁 Tặng quà</button>
             <button className="btn" onClick={() => (p.friend === 'accepted' ? openChat(p.id, p.name) : toast('Kết bạn trước để nhắn tin riêng nhé'))}>💬 Nhắn riêng</button>
           </div>
         </div>
@@ -122,7 +125,7 @@ export function MapPanel() {
 }
 
 type InvTab = 'kho' | 'tui';
-const SLOT_LABEL: [string, string][] = [['top', '👕 Áo'], ['bottom', '👖 Quần'], ['hat', '🎩 Mũ'], ['acc', '🕶️ Phụ kiện']];
+const SLOT_LABEL: [string, string][] = [['top', '👕 Áo'], ['bottom', '👖 Quần'], ['hat', '🎩 Mũ'], ['acc', '🕶️ Phụ kiện'], ['hand', '🎈 Cầm tay'], ['mouth', '🎺 Ngậm'], ['ride', '🛵 Phương tiện']];
 
 /** Hai bảng riêng: Kho nông trại (nông sản, hạt giống, thức ăn) và Túi đồ cá nhân (trang phục). */
 export function InventoryPanel({ tab }: { tab: InvTab }) {
@@ -236,7 +239,7 @@ function TuiView({ clothes }: { clothes: [string, number][] }) {
   async function wear(id: string) {
     if (busy) return;
     const slot = ITEMS[id].slot as string;
-    const optional = slot === 'hat' || slot === 'acc';
+    const optional = (OPTIONAL_SLOTS as string[]).includes(slot);
     if (worn.has(id) && !optional) return;
     const next = { ...ap, [slot]: worn.has(id) ? null : id };
     setBusy(id);
@@ -245,7 +248,7 @@ function TuiView({ clothes }: { clothes: [string, number][] }) {
     if (r.ok) toast(worn.has(id) ? `Đã tháo ${ITEMS[id].name}` : `✨ Đã mặc ${ITEMS[id].name}`, 'success');
   }
 
-  if (!clothes.length) return <div className="inv-empty"><span>🎒</span><p>Túi trống.<br />Ghé cửa hàng thời trang ở Khu vui chơi nhé!</p></div>;
+  if (!clothes.length) return <div className="inv-empty"><span>🎒</span><p>Túi trống.<br />Ghé Tiệm thời trang hoặc Cửa hàng ở Khu vui chơi nhé!</p></div>;
   return (
     <div className="inv-body tui-layout">
       {/* Nhân vật đang mặc gì */}
@@ -268,7 +271,7 @@ function TuiView({ clothes }: { clothes: [string, number][] }) {
                     <div className="cloth-ava"><AvatarPreview appearance={{ ...ap, [slot]: id } as unknown as Appearance} size={64} /></div>
                     <span className="cloth-name">{ITEMS[id].name}</span>
                     {worn.has(id)
-                      ? <span className="cloth-worn">✓ Đang mặc{(slot === 'hat' || slot === 'acc') ? ' · chạm để tháo' : ''}</span>
+                      ? <span className="cloth-worn">✓ Đang dùng{(OPTIONAL_SLOTS as string[]).includes(slot) ? ' · chạm để tháo' : ''}</span>
                       : <span className="cloth-try">Chạm để mặc</span>}
                   </button>
                 ))}

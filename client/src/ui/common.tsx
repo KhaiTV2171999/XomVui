@@ -1,6 +1,6 @@
 import { Component, memo, ReactNode, useEffect, useRef } from 'react';
 import type { Appearance } from '../../../shared/catalog';
-import { AV_H, AV_W, drawAvatar } from '../avatar/draw';
+import { avatarBounds, drawAvatar } from '../avatar/draw';
 
 /** Hình nhân vật: chỉ vẽ lại canvas khi ngoại hình / cỡ thật sự đổi (không vẽ lại vì object mới y hệt). */
 export const AvatarPreview = memo(AvatarPreviewImpl, (a, b) =>
@@ -8,7 +8,8 @@ export const AvatarPreview = memo(AvatarPreviewImpl, (a, b) =>
 
 function AvatarPreviewImpl({ appearance, size = 120, className = '' }: { appearance: Appearance; size?: number; className?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const w = Math.round((size * AV_W) / AV_H);
+  const b = avatarBounds(appearance);
+  const w = Math.round((size * b.w) / b.h);
   useEffect(() => {
     const c = ref.current!;
     const dpr = window.devicePixelRatio || 1;
@@ -16,8 +17,12 @@ function AvatarPreviewImpl({ appearance, size = 120, className = '' }: { appeara
     c.height = size * dpr;
     const ctx = c.getContext('2d')!;
     ctx.clearRect(0, 0, c.width, c.height);
-    drawAvatar(ctx, appearance, (size / AV_H) * dpr);
-  }, [appearance, size, w]);
+    const k = (size / b.h) * dpr;
+    ctx.save();
+    ctx.translate(-b.x * k, -b.y * k);
+    drawAvatar(ctx, appearance, k);
+    ctx.restore();
+  }, [appearance, size, w, b.x, b.y, b.h]);
   return <canvas ref={ref} className={className} style={{ width: w, height: size }} />;
 }
 

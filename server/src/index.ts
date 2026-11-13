@@ -6,11 +6,17 @@ import path from 'node:path';
 import { Server } from 'socket.io';
 import { ECON } from '../../shared/catalog';
 import { addCoins, claimDaily, createSession, createUser, findUser, getProfile, initDb, Profile, userIdFromToken } from './db';
-import { handle, online, OnlinePlayer, pushMe, setIo, toast, vnDay } from './game/online';
+import { handle, jailUntil, online, OnlinePlayer, pushMe, setIo, toast, vnDay } from './game/online';
+import { registerCommunity } from './game/community';
+import { registerSteal } from './game/steal';
+import { onDisconnectTower, registerTower, towerOverview } from './game/tower';
+import { onDisconnectWerewolf, registerWerewolf, werewolfOverview } from './game/werewolf';
+import { startPolice } from './game/police';
 import { joinZone, leaveZone, registerWorld } from './game/world';
 import { currentCatalog, initCatalog } from './game/catalog';
 import { registerFarm } from './game/farm';
 import { registerShop } from './game/shop';
+import { registerQuests } from './game/quests';
 import { notifyFriendsPresence, pushFriends, pushUnread, registerSocial } from './game/social';
 import { bcOverview, registerBauCua, startBauCua } from './game/baucua';
 import { onDisconnectTienLen, registerTienLen, tlOverview } from './game/tienlen';
@@ -121,22 +127,31 @@ io.on('connection', (socket) => {
     socket, zone: null, x: 0, y: 0, lastChat: 0,
   };
   online.set(uid, p);
+  // Đồng bộ trạng thái lao động công ích theo DB mỗi lần vào game (gỡ giam trong DB là có hiệu lực ngay)
+  if (prof.jailUntil) jailUntil.set(uid, prof.jailUntil); else jailUntil.delete(uid);
   // Bảng giá nông trại hiện tại (lưu trong DB) — gửi trước mọi dữ liệu khác
   socket.emit('catalog', currentCatalog());
 
   registerWorld(socket, p);
   registerFarm(socket, p);
   registerShop(socket, p);
+  registerQuests(socket, p);
   registerSocial(socket, p);
   registerBauCua(socket, p);
   registerTienLen(socket, p);
+  registerCommunity(socket, p);
+  registerSteal(socket, p);
+  registerTower(socket, p);
+  registerWerewolf(socket, p);
   // Sảnh Khu giải trí: tình hình trực tiếp các trò
-  handle(socket, 'games:overview', () => ({ now: Date.now(), baucua: bcOverview(), tienlen: tlOverview() }));
+  handle(socket, 'games:overview', () => ({ now: Date.now(), baucua: bcOverview(), tienlen: tlOverview(), tower: towerOverview(), werewolf: werewolfOverview() }));
 
   socket.on('disconnect', () => {
     if (online.get(uid)?.socket !== socket) return; // đã bị thay bởi kết nối mới
     leaveZone(p);
     onDisconnectTienLen(uid);
+    onDisconnectTower(uid);
+    onDisconnectWerewolf(uid);
     online.delete(uid);
     notifyFriendsPresence(uid).catch((e) => console.error('[presence]', e));
   });
@@ -169,6 +184,7 @@ initDb()
   .then(() => initCatalog())
   .then(() => {
     startBauCua();
+    startPolice();
     server.listen(PORT, () => console.log(`🏡 Xóm Vui server chạy tại http://localhost:${PORT}`));
   })
   .catch((e) => {

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from
 import { call } from '../net';
 import { ChatMessage, set, useStore } from '../store';
 import { Modal } from './common';
+import { openGift } from './GiftDialog';
 
 /** Dùng cho nút Gửi: giữ focus ở ô nhập để bàn phím điện thoại không bị đóng rồi mở lại. */
 export const keepFocus = (e: { preventDefault: () => void }) => e.preventDefault();
@@ -138,6 +139,7 @@ function Conversation({ friendId, name }: { friendId: number; name: string }) {
         <button className="icon-btn msg-back" onClick={() => set({ chatWith: null })} aria-label="Quay lại">←</button>
         <b>{name}</b>
         <small>{online ? '🟢 Đang online' : '⚪ Offline · sẽ nhận được khi vào game'}</small>
+        <button className="icon-btn msg-gift" title="Tặng quà" aria-label="Tặng quà" onClick={() => openGift(friendId, name)}>🎁</button>
       </div>
       <div className="msg-log" ref={logRef}>
         {more && messages && messages.length > 0 && <button className="btn small msg-more" onClick={loadOlder}>Tải tin cũ hơn</button>}

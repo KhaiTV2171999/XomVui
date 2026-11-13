@@ -2,7 +2,8 @@ import { ANIMALS, CROPS, ITEMS, MAX_ANIMALS } from '../../../shared/catalog';
 import { call } from '../net';
 import { confirmBox, fmt, set, toast, useStore } from '../store';
 import { fmtTime } from '../game/farmUtil';
-import { AvatarPreview, Modal, Tabs } from './common';
+import { Modal, Tabs } from './common';
+import { GearShopPanel } from './StorePanels';
 
 const DOG_PRICE = 800;
 const DOG_LEVEL = 2;
@@ -26,16 +27,19 @@ function DogCard({ level }: { level: number }) {
   );
 }
 
-type Tab ='seed' | 'animal' | 'clothing' | 'sell';
+type Tab = 'seed' | 'animal' | 'sell';
 
 export function ShopPanel() {
+  const zoneKind = useStore((s) => s.zone?.kind);
+  // Ở nông trại: cửa hàng nông trại. Ở Khu vui chơi: cửa hàng vật phẩm (cầm tay, ngậm, phương tiện).
+  return zoneKind === 'farm' ? <FarmShop /> : <GearShopPanel />;
+}
+
+function FarmShop() {
   useStore((s) => s.catalogVer); // vẽ lại khi bảng giá đổi
   const me = useStore((s) => s.me)!;
-  const zoneKind = useStore((s) => s.zone?.kind);
-  // Ở nông trại: hạt giống, vật nuôi, bán nông sản. Ở nơi khác: chỉ quần áo, phụ kiện.
-  const farmShop = zoneKind === 'farm';
   const storedTab = useStore((s) => s.shopTab) as Tab;
-  const tab: Tab = farmShop ? (storedTab === 'clothing' ? 'seed' : storedTab) : 'clothing';
+  const tab: Tab = (['seed', 'animal', 'sell'] as string[]).includes(storedTab) ? storedTab : 'seed';
   const setTab = (t: Tab) => set({ shopTab: t });
 
   async function buy(itemId: string, qty = 1) {
@@ -48,7 +52,7 @@ export function ShopPanel() {
     if (r.ok) toast(`Bán được ${fmt(r.earned)} xu 💰`, 'success');
   }
 
-  const sellable = Object.entries(me.inventory).filter(([id, q]) => q > 0 && ITEMS[id]?.sell != null);
+  const sellable = Object.entries(me.inventory).filter(([id, q]) => q > 0 && ITEMS[id]?.kind === 'produce' && ITEMS[id].sell != null);
   const sellAll = () => {
     const total = sellable.reduce((s, [id, q]) => s + ITEMS[id].sell! * q, 0);
     confirmBox(`Bán toàn bộ nông sản được ${fmt(total)} xu?`, async () => {
@@ -58,8 +62,8 @@ export function ShopPanel() {
   };
 
   return (
-    <Modal title={farmShop ? '🌱 Cửa hàng nông trại' : '🛍️ Cửa hàng thời trang'} onClose={() => set({ panel: null })} wide>
-      {farmShop && <Tabs<Tab> value={tab} onChange={setTab} tabs={[['seed', '🌱 Hạt giống'], ['animal', '🐔 Vật nuôi'], ['sell', '💰 Bán nông sản']]} />}
+    <Modal title="🌱 Cửa hàng nông trại" onClose={() => set({ panel: null })} wide>
+      <Tabs<Tab> value={tab} onChange={setTab} tabs={[['seed', '🌱 Hạt giống'], ['animal', '🐔 Vật nuôi'], ['sell', '💰 Bán nông sản']]} />
 
       {tab === 'seed' && (
         <div className="shop-grid">
@@ -112,25 +116,6 @@ export function ShopPanel() {
               <button className="btn small primary" onClick={() => buy('feed', 10)}>x10 · 150</button>
             </div>
           </div>
-        </div>
-      )}
-
-      {tab === 'clothing' && (
-        <div className="shop-grid clothes">
-          {Object.values(ITEMS).filter((i) => i.kind === 'clothing' && i.price! > 0).map((it) => {
-            const owned = (me.inventory[it.id] ?? 0) > 0;
-            const locked = me.level < (it.level ?? 1);
-            const preview = { ...me.appearance, [it.slot!]: it.id };
-            return (
-              <div key={it.id} className={`shop-card ${locked ? 'locked' : ''}`}>
-                <AvatarPreview appearance={preview} size={96} />
-                <div className="shop-name">{it.name}</div>
-                {owned ? <div className="owned-tag">✔ Đã có</div>
-                  : locked ? <div className="lock-tag">🔒 Cấp {it.level}</div>
-                  : <button className="btn small primary" onClick={() => buy(it.id)}>💰 {fmt(it.price!)}</button>}
-              </div>
-            );
-          })}
         </div>
       )}
 

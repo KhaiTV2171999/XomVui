@@ -4,8 +4,12 @@ import { Appearance, DEFAULT_APPEARANCE } from '../../../shared/catalog';
 import { analyze, beats, botChoose, cardLabel, Combo, COMBO_NAMES } from '../../../shared/tienlen';
 import { addCoins, GameError, getProfile, takeCoinsUpTo } from '../db';
 import { getIo, handle, online, OnlinePlayer, pushMe, toast } from './online';
+import { questBump } from './quests';
 
-const STAKES = [100, 500, 1000, 5000];
+/** Mức cược = số xu mỗi lá bài còn lại trên tay người thua. */
+const STAKES = [10, 50, 100, 500];
+/** Thua nặng nhất: cóng (còn đủ 13 lá) → trả gấp đôi = 26 lá. Cần đủ xu cho trường hợp này mới được ngồi. */
+const MAX_LOSS = 26;
 const TURN_MS = 20000;
 const LOBBY = 'tl:lobby';
 const BOT_NAMES = ['Mèo Mập', 'Cún Con', 'Gấu Nâu', 'Thỏ Ngọc', 'Cáo Nhỏ', 'Vịt Bầu'];
@@ -37,7 +41,7 @@ interface Table {
   turnEndsAt: number;
   timer: NodeJS.Timeout | null;
   log: string[];
-  result: { winner: string; rows: { name: string; delta: number; left: number[] }[] } | null;
+  result: { winner: string; winnerSeat: number; rows: { seat: number; name: string; delta: number; left: number[]; cong: boolean }[] } | null;
 }
 
 const tables = new Map<number, Table>();
@@ -188,28 +192,32 @@ function endGame(t: Table, winnerSeat: number) {
   const losers = t.seats
     .map((s, i) => ({ s, i }))
     .filter(({ s, i }) => s && i !== winnerSeat)
-    .map(({ s }) => ({ seat: s!, userId: s!.kind === 'human' ? s!.userId! : null, mult: s!.hand.length === 13 ? 2 : 1, left: [...s!.hand].sort((a, b) => a - b) }));
+    .map(({ s, i }) => ({ seat: s!, idx: i, userId: s!.kind === 'human' ? s!.userId! : null, mult: s!.hand.length === 13 ? 2 : 1, left: [...s!.hand].sort((a, b) => a - b) }));
   pushTable(t);
   pushLobby();
-  void settleGame(t, winner, losers).catch((e) => console.error('tienlen settle', e));
+  void settleGame(t, winner, winnerSeat, losers).catch((e) => console.error('tienlen settle', e));
 }
 
-/** Tính tiền cuối ván: người thua trả (tối đa số xu đang có), người thắng nhận tổng. */
+/**
+ * Tính tiền cuối ván theo lá: mỗi người thua trả (số lá còn × mức cược/lá), bị cóng thì gấp đôi;
+ * người thắng nhận tổng. Trả tối đa số xu đang có.
+ */
 async function settleGame(
-  t: Table, winner: Seat,
-  losers: { seat: Seat; userId: number | null; mult: number; left: number[] }[],
+  t: Table, winner: Seat, winnerSeat: number,
+  losers: { seat: Seat; idx: number; userId: number | null; mult: number; left: number[] }[],
 ) {
-  const rows: { name: string; delta: number; left: number[] }[] = [];
+  const rows: { seat: number; name: string; delta: number; left: number[]; cong: boolean }[] = [];
   let pot = 0;
   for (const l of losers) {
-    const due = t.stake * l.mult; // cóng: phạt gấp đôi
+    const due = t.stake * l.left.length * l.mult;
     const paid = l.userId != null ? await takeCoinsUpTo(l.userId, due) : due; // bot: nhà cái trả đủ
     pot += paid;
-    rows.push({ name: l.seat.name + (l.mult === 2 ? ' (cóng)' : ''), delta: -paid, left: l.left });
+    rows.push({ seat: l.idx, name: l.seat.name, delta: -paid, left: l.left, cong: l.mult === 2 });
   }
   if (winner.kind === 'human' && winner.userId != null) await addCoins(winner.userId, pot);
-  rows.unshift({ name: winner.name, delta: pot, left: [] });
-  t.result = { winner: winner.name, rows };
+  rows.unshift({ seat: winnerSeat, name: winner.name, delta: pot, left: [], cong: false });
+  t.result = { winner: winner.name, winnerSeat, rows };
+  t.log.push(`💰 ${winner.name} ăn ${pot.toLocaleString('vi')} xu (${t.stake} xu/lá)`);
   await Promise.all(humans(t).map((h) => pushMe(h.userId!)));
   if (losers.some((l) => l.userId != null)) await Promise.all(losers.filter((l) => l.userId != null).map((l) => pushMe(l.userId!)));
   if (winner.userId != null) await pushMe(winner.userId);
@@ -227,7 +235,7 @@ function leaveTable(uid: number) {
   const seat = t.seats[idx]!;
   if (t.playing) {
     // Bỏ giữa chừng: phạt gấp đôi, bot đánh thay.
-    takeCoinsUpTo(uid, t.stake * 2)
+    takeCoinsUpTo(uid, t.stake * 13 * 2)
       .then((pen) => {
         toast(uid, `Bạn rời bàn giữa ván và bị phạt ${pen.toLocaleString('vi')} xu`, 'error');
         return pushMe(uid);
@@ -261,7 +269,7 @@ export function registerTienLen(socket: Socket, p: OnlinePlayer) {
 
   const seatAt = async (stake: number) => {
     const coins = (await getProfile(uid)).coins;
-    if (coins < stake * 2) throw new GameError(`Cần ít nhất ${(stake * 2).toLocaleString('vi')} xu để ngồi bàn này`);
+    if (coins < stake * MAX_LOSS) throw new GameError(`Cần ít nhất ${(stake * MAX_LOSS).toLocaleString('vi')} xu để ngồi bàn này`);
   };
 
   handle(socket, 'tl:lobby', () => {
@@ -343,11 +351,12 @@ export function registerTienLen(socket: Socket, p: OnlinePlayer) {
     if (t.hostId !== uid) throw new GameError('Chỉ chủ bàn mới bắt đầu được');
     if (t.playing) throw new GameError('Ván đang diễn ra');
     for (const h of humans(t)) {
-      if ((await getProfile(h.userId!)).coins < t.stake * 2) throw new GameError(`${h.name} không đủ xu để chơi`);
+      if ((await getProfile(h.userId!)).coins < t.stake * MAX_LOSS) throw new GameError(`${h.name} không đủ xu để chơi (cần ${(t.stake * MAX_LOSS).toLocaleString('vi')} xu)`);
     }
     // kiểm tra lại sau khi chờ DB
     if (t.playing || !tables.has(t.id)) throw new GameError('Ván đang diễn ra');
     const occupied = t.seats.map((s, i) => (s ? i : -1)).filter((i) => i >= 0);
+    for (const h of humans(t)) questBump(h.userId!, 'play');
     if (occupied.length < 2) throw new GameError('Cần ít nhất 2 người (có thể thêm bot)');
     // Chia bài
     const deck = Array.from({ length: 52 }, (_, i) => i);

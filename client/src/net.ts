@@ -1,7 +1,7 @@
 import { SERVER_URL } from './config';
 import { io, Socket } from 'socket.io-client';
 import { addChat, get, set, toast } from './store';
-import type { ChatMessage, FarmData, Me, PlayerPub, ZoneInfo } from './store';
+import type { ChatMessage, FarmData, Me, NewsItem, PlayerPub, ZoneInfo } from './store';
 import { sfx } from './sound';
 import type { Appearance, CatalogPayload } from '../../shared/catalog';
 import { applyCatalog } from '../../shared/catalog';
@@ -31,6 +31,7 @@ export function connect(token: string) {
 
   socket.on('connect', () => {
     set({ connected: true });
+    call('quest:list', {}, { silent: true }).then((r) => r.ok && set({ quests: r.state as never }));
     // Tải vài tin chat cộng đồng gần nhất nếu khung chat chưa có tin nào
     if (!get().chat.some((m) => m.kind === 'chat')) {
       call('chat:history', {}, { silent: true }).then((r) => {
@@ -48,6 +49,7 @@ export function connect(token: string) {
   });
 
   socket.on('me', (me: Me) => set({ me }));
+  socket.on('quest:state', (q) => set({ quests: q }));
   // Bảng giá nông trại (lưu trong DB server) — nạp vào CROPS/ANIMALS/ITEMS dùng chung, rồi vẽ lại giao diện
   socket.on('catalog', (c: CatalogPayload) => {
     applyCatalog(c);
@@ -67,9 +69,19 @@ export function connect(token: string) {
   socket.on('player:leave', (d: { id: number }) => bus.emit('leave', d));
   socket.on('player:move', (d: { id: number; x: number; y: number }) => bus.emit('move', d));
   socket.on('player:appearance', (d: { id: number; appearance: Appearance }) => bus.emit('appearance', d));
-  socket.on('player:chat', (d: { id: number; name: string; text: string }) => {
-    addChat({ kind: 'chat', name: d.name, text: d.text });
+  socket.on('player:chat', (d: { id: number; name: string; text: string; scope?: 'local' }) => {
+    addChat({ kind: 'chat', name: d.name, text: d.text, scope: d.scope });
     bus.emit('chat', d);
+  });
+  // Lời mời vào làng Ma Sói (bật lên ở bất cứ đâu trong game)
+  socket.on('ww:invite', (d: { roomId: number; fromId: number; fromName: string; count: number }) => {
+    set({ wwInvite: d });
+    sfx('ding');
+  });
+  // Bảng tin cộng đồng: cư dân mới, cảnh sát bắt trộm...
+  socket.on('news', (n: NewsItem) => {
+    set((s) => ({ news: [n, ...s.news].slice(0, 50), newsUnread: s.panel === 'residents' ? 0 : s.newsUnread + 1 }));
+    addChat({ kind: 'news', text: n.text });
   });
   socket.on('pm', (m: ChatMessage) => {
     const meId = get().me?.id;
@@ -95,7 +107,7 @@ export function connect(token: string) {
   });
 
   // Các sự kiện của mini-game được panel tự lắng nghe.
-  for (const ev of ['bc:state', 'bc:result', 'tl:state', 'tl:lobby', 'farm:dogchase']) {
+  for (const ev of ['bc:state', 'bc:result', 'tl:state', 'tl:lobby', 'farm:dogchase', 'police:arrive', 'police:leave', 'police:arrest', 'player:jail', 'steal:begin', 'steal:end', 'tw:room', 'tw:lobby', 'ww:room', 'ww:lobby', 'ww:voice:signal']) {
     socket.on(ev, (d) => bus.emit(ev, d));
   }
 }
@@ -103,8 +115,15 @@ export function connect(token: string) {
 /** Đi tới khu khác (có cảnh xe buýt nếu phù hợp). */
 // Chỉ khi chạy dev: cho script kiểm thử đi tới khu khác
 if (import.meta.env.DEV) (window as unknown as { __xvTravel: unknown }).__xvTravel = (z: string) => travel(z);
+if (import.meta.env.DEV) (window as unknown as { __xvCall: unknown }).__xvCall = (ev: string, d?: object) => call(ev, d ?? {}, { silent: true });
 
 export function travel(zone: string) {
+  // Đang lao động công ích: chỉ được ở Công viên
+  const until = get().me?.jailUntil;
+  if (until && until > Date.now() && zone !== 'park') {
+    toast(`🧹 Bạn đang lao động công ích ở Công viên — còn ${Math.ceil((until - Date.now()) / 60000)} phút nữa mới được đi`, 'error');
+    return;
+  }
   bus.emit('travel', zone);
 }
 

@@ -38,7 +38,7 @@ export function PhaserGame() {
 
     // Điện thoại: bảng phủ kín màn hình (tin nhắn, khu giải trí) che hết thế giới game →
     // cho Phaser ngủ để máy dồn sức cho giao diện, gõ chữ / cuộn không bị khựng.
-    const FULL = new Set(['messages', 'games', 'baucua', 'tienlen']);
+    const FULL = new Set(['messages', 'games', 'baucua', 'tienlen', 'tower', 'werewolf']);
     const mobile = window.matchMedia('(max-width: 760px), (max-height: 600px)');
     const syncSleep = () => {
       const hide = mobile.matches && FULL.has(useStore.getState().panel ?? '');

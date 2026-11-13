@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
-import type { Appearance } from '../../../shared/catalog';
-import { AV_H, AV_W, appearanceKey, drawAvatar, IDLE, WALK } from '../avatar/draw';
+import { rideSpeed, type Appearance } from '../../../shared/catalog';
+import { AV_H, AV_W, appearanceKey, drawAvatar, FOOT_Y, IDLE, rideLift, WALK } from '../avatar/draw';
 import { sfx } from '../sound';
 import { FONT, fontMetrics } from './mapArt';
 
@@ -42,27 +42,50 @@ export class PlayerSprite extends Phaser.GameObjects.Container {
   facingBack = false;
   frameIdx = 0;
   isMe: boolean;
+  /** Hệ số tốc độ (phương tiện) */
+  speedMul = 1;
+  riding = false;
 
-  constructor(scene: Phaser.Scene, p: { id: number; name: string; level: number; appearance: Appearance; x: number; y: number }, isMe: boolean) {
+  private baseLabel: string;
+
+  constructor(scene: Phaser.Scene, p: { id: number; name: string; level: number; appearance: Appearance; x: number; y: number; jailed?: boolean }, isMe: boolean, labelText?: string) {
     super(scene, p.x, p.y);
     this.id = p.id;
     this.isMe = isMe;
-    this.body2 = scene.add.image(0, 0, ensureAvatarTexture(scene, p.appearance), 'f0').setOrigin(0.5, 0.96).setScale(DISPLAY_SCALE);
-    const h = AV_H * TEX_SCALE * DISPLAY_SCALE;
-    this.label = scene.add.text(0, -h - 4, `${p.name}  ·  Lv${p.level}`, {
+    this.body2 = scene.add.image(0, 0, ensureAvatarTexture(scene, p.appearance), 'f0').setOrigin(0.5, FOOT_Y / AV_H).setScale(DISPLAY_SCALE);
+    const h = 96 * TEX_SCALE * DISPLAY_SCALE;
+    this.baseLabel = labelText ?? `${p.name}  ·  Lv${p.level}`;
+    this.label = scene.add.text(0, -h - 4, p.jailed ? `🧹 ${this.baseLabel}` : this.baseLabel, {
       fontFamily: FONT, fontSize: '14px', fontStyle: 'bold', metrics: fontMetrics(14),
       color: isMe ? '#fff3b0' : '#ffffff', stroke: '#3b2f4a', strokeThickness: 4,
     }).setOrigin(0.5).setResolution(2);
     this.add([this.body2, this.label]);
+    this.applyRide(p.appearance);
     this.setDepth(p.y);
-    this.setSize(AV_W * TEX_SCALE * DISPLAY_SCALE * 0.7, h);
+    this.setSize(64 * TEX_SCALE * DISPLAY_SCALE * 0.7, h);
     this.setInteractive(new Phaser.Geom.Rectangle(-24, -h, 48, h), Phaser.Geom.Rectangle.Contains);
     if (!isMe) this.input!.cursor = 'pointer';
     scene.add.existing(this);
   }
 
+  /** Đang lao động công ích: thêm 🧹 trước tên */
+  setJailed(jailed: boolean) {
+    const t = jailed ? `🧹 ${this.baseLabel}` : this.baseLabel;
+    if (this.label.text !== t) this.label.setText(t);
+  }
+
   setAppearance(a: Appearance) {
     this.body2.setTexture(ensureAvatarTexture(this.scene, a), this.frameName());
+    this.applyRide(a);
+  }
+
+  /** Phương tiện: đổi tốc độ đi + đẩy tên lên theo độ cao xe */
+  private applyRide(a: Appearance) {
+    this.speedMul = rideSpeed(a);
+    this.riding = !!a.ride;
+    const h = (96 + rideLift(a)) * TEX_SCALE * DISPLAY_SCALE;
+    this.label.y = -h - 4;
+    if (this.bubble) this.bubble.y = this.label.y - 16 - (this.bubble.getBounds().height || 0) / 2;
   }
 
   private frameName() {
@@ -81,7 +104,7 @@ export class PlayerSprite extends Phaser.GameObjects.Container {
     this.startWalk();
     this.moveTween = this.scene.tweens.add({
       targets: this, x, y,
-      duration: (dist / WALK_SPEED) * 1000,
+      duration: (dist / (WALK_SPEED * this.speedMul)) * 1000,
       onUpdate: () => this.setDepth(this.y),
       onComplete: () => {
         this.moveTween = null;
@@ -102,7 +125,7 @@ export class PlayerSprite extends Phaser.GameObjects.Container {
           // bước chân chạm đất: bụi + tiếng bước (chỉ nhân vật của mình mới có tiếng)
           if (this.frameIdx % 2 === 0) {
             this.dust();
-            if (this.isMe) sfx('step');
+            if (this.isMe && !this.riding) sfx('step');
           }
         },
       });

@@ -95,6 +95,35 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_pair ON messages (LEAST(from_id, to_id), GREATEST(from_id, to_id), id);
 CREATE INDEX IF NOT EXISTS messages_unread ON messages (to_id) WHERE read_at IS NULL;
+-- Tiền án (số lần bị cảnh sát bắt) và hạn lao động công ích
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS offenses INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS jail_until BIGINT;
+-- Xây nhà cao tầng: điểm cao nhất mỗi người (chơi đơn xếp hạng)
+CREATE TABLE IF NOT EXISTS tower_scores (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  best INTEGER NOT NULL DEFAULT 0,
+  best_floors INTEGER NOT NULL DEFAULT 0,
+  plays INTEGER NOT NULL DEFAULT 0,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tower_scores_best ON tower_scores (best DESC);
+-- Bảng tin cộng đồng (cư dân mới, cảnh sát bắt trộm...)
+CREATE TABLE IF NOT EXISTS announcements (
+  id BIGSERIAL PRIMARY KEY,
+  kind TEXT NOT NULL,
+  text TEXT NOT NULL,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at BIGINT NOT NULL
+);
+-- Nhiệm vụ hằng ngày: tiến độ + đã nhận thưởng (mỗi người mỗi ngày một dòng)
+CREATE TABLE IF NOT EXISTS quest_days (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day TEXT NOT NULL,
+  progress JSONB NOT NULL DEFAULT '{}',
+  claimed JSONB NOT NULL DEFAULT '[]',
+  chest BOOLEAN NOT NULL DEFAULT FALSE,
+  PRIMARY KEY (user_id, day)
+);
 `;
 
 /** Tạo bảng nếu chưa có. Gọi một lần khi server khởi động. */
@@ -138,6 +167,10 @@ export interface Profile {
   appearance: Appearance;
   created: boolean;
   lastDaily: string | null;
+  /** Số lần bị cảnh sát bắt */
+  offenses: number;
+  /** Đang lao động công ích tới thời điểm này (ms), null = tự do */
+  jailUntil: number | null;
 }
 
 export interface Plot {
@@ -147,6 +180,8 @@ export interface Plot {
   waterStage: number;
   yieldLeft: number;
   stolenBy: number[];
+  /** Cấp ô đất: 1 = Đất màu mỡ (sản lượng ×1,5). Không có = đất thường. */
+  lvl?: number;
 }
 export interface Animal {
   type: string;
@@ -196,6 +231,7 @@ function rowToProfile(r: any): Profile {
   return {
     userId: r.user_id, name: r.name, coins: r.coins, xp: r.xp, level: r.level,
     appearance: r.appearance, created: !!r.created, lastDaily: r.last_daily ?? null,
+    offenses: r.offenses ?? 0, jailUntil: r.jail_until != null && Number(r.jail_until) > Date.now() ? Number(r.jail_until) : null,
   };
 }
 
@@ -361,4 +397,108 @@ export async function lastMessages(me: number): Promise<Record<number, ChatMessa
      FROM messages WHERE from_id = $1 OR to_id = $1 ORDER BY other, id DESC`, [me],
   );
   return Object.fromEntries(rows.map((r) => [r.other, rowToMsg(r)]));
+}
+
+// ------------------------------------------------------------ Cư dân, bảng tin, cảnh sát
+
+/** Danh sách cư dân (đã tạo nhân vật), tìm theo tên. */
+export async function listResidents(q: string, limit = 60) {
+  // thoát ký tự đặc biệt của LIKE (% _ \)
+  const like = `%${q.replace(/[%_\\]/g, (m) => '\\' + m)}%`;
+  return all<{ id: number; name: string; level: number; appearance: Appearance; joined: number }>(
+    `SELECT p.user_id AS id, p.name, p.level, p.appearance, u.created_at AS joined
+       FROM profiles p JOIN users u ON u.id = p.user_id
+      WHERE p.created AND ($1 = '' OR p.name ILIKE $2)
+      ORDER BY p.level DESC, u.created_at DESC LIMIT $3`, [q, like, limit]);
+}
+export async function countResidents(): Promise<number> {
+  return (await one<{ n: number }>('SELECT count(*)::int AS n FROM profiles WHERE created'))!.n;
+}
+
+export interface Announcement { id: number; kind: string; text: string; userId: number | null; at: number }
+export async function addAnnouncement(kind: string, text: string, userId: number | null): Promise<Announcement> {
+  const r = (await one<any>('INSERT INTO announcements (kind, text, user_id, created_at) VALUES ($1,$2,$3,$4) RETURNING *',
+    [kind, text, userId, Date.now()]))!;
+  return { id: Number(r.id), kind: r.kind, text: r.text, userId: r.user_id, at: Number(r.created_at) };
+}
+/** Xoá tin cũ trên Bảng tin: quá 3 ngày, hoặc ngoài 100 tin mới nhất. */
+export async function pruneAnnouncements(maxAgeMs = 3 * 24 * 3600_000, keep = 100) {
+  await all(`DELETE FROM announcements WHERE created_at < $1
+     OR id NOT IN (SELECT id FROM announcements ORDER BY id DESC LIMIT $2)`, [Date.now() - maxAgeMs, keep]);
+}
+
+export async function listAnnouncements(limit = 50): Promise<Announcement[]> {
+  const rows = await all<any>('SELECT * FROM announcements ORDER BY id DESC LIMIT $1', [limit]);
+  return rows.map((r) => ({ id: Number(r.id), kind: r.kind, text: r.text, userId: r.user_id, at: Number(r.created_at) }));
+}
+
+/** Ghi tiền án + hạn lao động công ích. Trả về số lần vi phạm mới. */
+export async function addOffense(userId: number, jailUntil: number): Promise<number> {
+  const r = await one<{ offenses: number }>(
+    'UPDATE profiles SET offenses = offenses + 1, jail_until = $2 WHERE user_id = $1 RETURNING offenses', [userId, jailUntil]);
+  return r?.offenses ?? 1;
+}
+
+// ------------------------------------------------------------ Xây nhà cao tầng
+
+/** Ghi một ván chơi đơn; trả về điểm cao nhất (sau khi cập nhật) và có phải kỷ lục mới không. */
+export async function saveTowerScore(userId: number, score: number, floors: number) {
+  const r = (await one<{ best: number; best_floors: number; plays: number }>(
+    `INSERT INTO tower_scores (user_id, best, best_floors, plays, updated_at) VALUES ($1, $2, $3, 1, $4)
+     ON CONFLICT (user_id) DO UPDATE SET
+       plays = tower_scores.plays + 1,
+       best_floors = CASE WHEN EXCLUDED.best > tower_scores.best THEN EXCLUDED.best_floors ELSE tower_scores.best_floors END,
+       best = GREATEST(tower_scores.best, EXCLUDED.best),
+       updated_at = CASE WHEN EXCLUDED.best > tower_scores.best THEN EXCLUDED.updated_at ELSE tower_scores.updated_at END
+     RETURNING best, best_floors, plays`, [userId, score, floors, Date.now()]))!;
+  return { best: r.best, bestFloors: r.best_floors, plays: r.plays };
+}
+
+export async function towerBoard(limit = 20) {
+  return all<{ id: number; name: string; best: number; floors: number; appearance: Appearance }>(
+    `SELECT t.user_id AS id, p.name, t.best, t.best_floors AS floors, p.appearance
+       FROM tower_scores t JOIN profiles p ON p.user_id = t.user_id
+      WHERE t.best > 0 ORDER BY t.best DESC, t.updated_at ASC LIMIT $1`, [limit]);
+}
+
+export async function towerMine(userId: number) {
+  const r = await one<{ best: number; best_floors: number; plays: number }>('SELECT best, best_floors, plays FROM tower_scores WHERE user_id = $1', [userId]);
+  if (!r || r.best <= 0) return { best: 0, floors: 0, plays: r?.plays ?? 0, rank: null as number | null };
+  const rk = (await one<{ n: number }>('SELECT count(*)::int + 1 AS n FROM tower_scores WHERE best > $1', [r.best]))!;
+  return { best: r.best, floors: r.best_floors, plays: r.plays, rank: rk.n };
+}
+
+// ---- Nhiệm vụ hằng ngày ----
+export interface QuestRow { progress: Record<string, number>; claimed: string[]; chest: boolean }
+
+export async function getQuestDay(userId: number, day: string): Promise<QuestRow> {
+  const r = await one<QuestRow>('SELECT progress, claimed, chest FROM quest_days WHERE user_id = $1 AND day = $2', [userId, day]);
+  return r ?? { progress: {}, claimed: [], chest: false };
+}
+
+/** Cộng tiến độ một nhiệm vụ (không vượt quá goal). Trả về tiến độ mới. */
+export async function bumpQuest(userId: number, day: string, kind: string, n: number, goal: number): Promise<number> {
+  const r = await one<{ v: number }>(
+    `INSERT INTO quest_days (user_id, day, progress) VALUES ($1, $2, jsonb_build_object($3::text, LEAST($4::int, $5::int)))
+     ON CONFLICT (user_id, day) DO UPDATE SET progress = quest_days.progress || jsonb_build_object($3::text,
+       LEAST($5::int, COALESCE((quest_days.progress->>$3)::int, 0) + $4::int))
+     RETURNING (progress->>$3)::int AS v`, [userId, day, kind, n, goal]);
+  return r?.v ?? 0;
+}
+
+/** Đánh dấu đã nhận thưởng; trả về false nếu đã nhận trước đó (chống nhận 2 lần). */
+export async function markQuestClaimed(userId: number, day: string, kind: string) {
+  const r = await all(`UPDATE quest_days SET claimed = claimed || to_jsonb($3::text)
+    WHERE user_id = $1 AND day = $2 AND NOT (claimed ? $3) RETURNING 1`, [userId, day, kind]);
+  return r.length > 0;
+}
+
+export async function markChest(userId: number, day: string) {
+  const r = await all('UPDATE quest_days SET chest = TRUE WHERE user_id = $1 AND day = $2 AND chest = FALSE RETURNING 1', [userId, day]);
+  return r.length > 0;
+}
+
+/** Dọn tiến độ nhiệm vụ cũ (quá 7 ngày). */
+export async function pruneQuests(beforeDay: string) {
+  await all('DELETE FROM quest_days WHERE day < $1', [beforeDay]);
 }

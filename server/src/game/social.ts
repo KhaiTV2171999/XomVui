@@ -1,9 +1,11 @@
 import type { Socket } from 'socket.io';
 import {
   addMessage, deleteFriend, findProfileByName, friendStatus, GameError, getConversation, getProfile, lastMessages,
-  listFriends, listIncoming, markRead, setFriend, tx, unreadCounts,
+  listFriends, listIncoming, markRead, setFriend, tx, unreadCounts, addItem, removeItem,
 } from '../db';
-import { handle, online, OnlinePlayer, toast } from './online';
+import { ITEMS } from '../../../shared/catalog';
+import { handle, online, OnlinePlayer, pushMe, toast } from './online';
+import { questBump } from './quests';
 
 export async function friendList(uid: number) {
   const [friends, incoming] = await Promise.all([listFriends(uid), listIncoming(uid)]);
@@ -114,7 +116,37 @@ export function registerSocial(socket: Socket, p: OnlinePlayer) {
   });
 
   handle(socket, 'pm:overview', async () => ({ last: await lastMessages(uid) }));
+
+  // ---- Tặng quà: nông sản, hạt giống, thức ăn (chỉ cho bạn bè) ----
+  let lastGift = 0;
+  handle<{ to: number; itemId: string; qty: number }>(socket, 'gift:send', async ({ to, itemId, qty }) => {
+    const other = Number(to);
+    const item = ITEMS[String(itemId)];
+    const n = Math.floor(Number(qty));
+    if (other === uid) throw new GameError('Không thể tự tặng mình');
+    if (!item || !GIFTABLE.has(item.kind)) throw new GameError('Món này không tặng được');
+    if (!Number.isInteger(n) || n < 1 || n > 999) throw new GameError('Số lượng không hợp lệ');
+    const now = Date.now();
+    if (now - lastGift < 1500) throw new GameError('Từ từ thôi, tặng nhanh quá!');
+    lastGift = now;
+    if ((await friendStatus(uid, other)) !== 'accepted') throw new GameError('Chỉ tặng quà được cho bạn bè');
+    await tx(async () => {
+      await removeItem(uid, item.id, n); // ném lỗi nếu không đủ
+      await addItem(other, item.id, n);
+    });
+    // Ghi thành tin nhắn riêng: người nhận offline vẫn biết, có lịch sử
+    const msg = { ...(await addMessage(uid, other, `🎁 Đã tặng bạn ${n} ${item.icon} ${item.name}`)), fromName: p.name };
+    online.get(other)?.socket.emit('pm', msg);
+    socket.emit('pm', msg);
+    toast(other, `🎁 ${p.name} vừa tặng bạn ${n} ${item.icon} ${item.name}!`, 'success');
+    questBump(uid, 'gift');
+    await Promise.all([pushMe(uid), pushMe(other)]);
+    return { ok: true };
+  });
 }
+
+/** Loại vật phẩm được phép tặng (trang phục thì không). */
+const GIFTABLE = new Set(['produce', 'seed', 'feed']);
 
 /** Gửi số tin chưa đọc (theo từng người) cho người chơi. */
 export async function pushUnread(uid: number) {

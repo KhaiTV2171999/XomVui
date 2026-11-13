@@ -1,11 +1,13 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { ANIMALS, CROPS, stealFloor } from '../../../shared/catalog';
+import { ANIMALS, CROPS, ECON, MAX_PLOTS } from '../../../shared/catalog';
 import { animalRemainMs, canWater, plotStage } from '../game/farmUtil';
-import { call, logout, send, travel } from '../net';
+import { logout, send, travel } from '../net';
 import { fmt, get, Panel, set, toast, useStore } from '../store';
 import { AvatarPreview, Coin, Modal, PanelBoundary } from './common';
 import { ShopPanel } from './ShopPanel';
 import { WardrobePanel } from './Wardrobe';
+import { BoutiquePanel } from './StorePanels';
+import { QuestPanel, questClaimable } from './QuestPanel';
 import { FriendsPanel, InventoryPanel, PlayerCard } from './SocialPanels';
 import { BauCuaPanel } from './BauCuaPanel';
 import { TienLenPanel } from './TienLenPanel';
@@ -13,11 +15,16 @@ import { GamesPanel } from './GamesPanel';
 import { keepFocus, MessengerPanel } from './MessengerPanel';
 import { BusStopPanel } from './BusStopPanel';
 import { GameChatDrawer } from './GameChat';
+import { JailBanner, NewsTicker, ResidentsPanel } from './CommunityPanel';
+import { GiftDialog } from './GiftDialog';
+import { TowerPanel } from './TowerPanel';
+import { WerewolfInvite, WerewolfPanel } from './WerewolfPanel';
 import { audioPrefs, onAudioPrefs, toggleMusic, toggleSfx } from '../sound';
 
 export function HUD() {
   const panel = useStore((s) => s.panel);
   const playerCard = useStore((s) => s.playerCard);
+  const gift = useStore((s) => s.gift);
   const zone = useStore((s) => s.zone);
   const traveling = useStore((s) => s.traveling);
   return (
@@ -29,13 +36,18 @@ export function HUD() {
       {!traveling && zone?.kind === 'farm' && zone.ownerId !== get().me?.id && (
         <VisitBar />
       )}
+      <JailBanner />
+      <WerewolfInvite />
       <Toasts />
       <ConnectionBanner />
       <PanelBoundary key={panel ?? 'none'} onClose={() => set({ panel: null })}>
       {panel === 'shop' && <ShopPanel />}
       {panel === 'wardrobe' && <WardrobePanel />}
+      {panel === 'boutique' && <BoutiquePanel />}
+      {panel === 'quests' && <QuestPanel />}
       {(panel === 'kho' || panel === 'inventory') && <InventoryPanel tab="kho" />}
       {panel === 'tui' && <InventoryPanel tab="tui" />}
+      {panel === 'residents' && <ResidentsPanel />}
       {panel === 'friends' && <FriendsPanel />}
       {panel === 'messages' && <MessengerPanel />}
       {panel === 'map' && <BusStopPanel title="🗺️ Bản đồ Xóm Vui" />}
@@ -43,9 +55,12 @@ export function HUD() {
       {panel === 'bus' && <BusStopPanel />}
       {panel === 'baucua' && <BauCuaPanel />}
       {panel === 'tienlen' && <TienLenPanel />}
+      {panel === 'tower' && <TowerPanel />}
+      {panel === 'werewolf' && <WerewolfPanel />}
       </PanelBoundary>
-      {(panel === 'games' || panel === 'baucua' || panel === 'tienlen') && <GameChatDrawer />}
+      {(panel === 'games' || panel === 'baucua' || panel === 'tienlen' || panel === 'tower' || panel === 'werewolf') && <GameChatDrawer />}
       {playerCard != null && <PlayerCard />}
+      {gift && <GiftDialog />}
       <ConfirmBox />
     </div>
   );
@@ -55,21 +70,19 @@ export function HUD() {
 function VisitBar() {
   const zone = useStore((s) => s.zone)!;
   const farm = useStore((s) => s.farm);
-  const meId = useStore((s) => s.me?.id ?? -1);
   const [, tick] = useState(0);
   useEffect(() => { const t = setInterval(() => tick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
   let steal = 0, water = 0;
   for (const pl of farm?.plots ?? []) {
     if (!pl.crop) continue;
-    const c = CROPS[pl.crop];
     if (plotStage(pl) === 3) {
-      if (!pl.stolenBy.includes(meId) && pl.yieldLeft > stealFloor(c.yield)) steal++;
+      if (pl.yieldLeft > 0) steal++;
     } else if (canWater(pl)) water++;
   }
   // Chuồng: sản phẩm vật nuôi lấy trộm được
   for (const an of farm?.animals ?? []) {
     const def = ANIMALS[an.type];
-    if (animalRemainMs(an) === 0 && !(an.stolenBy ?? []).includes(meId) && (an.left ?? def.qty) > stealFloor(def.qty)) steal++;
+    if (animalRemainMs(an) === 0 && (an.left ?? def.qty) > 0) steal++;
   }
   return (
     <div className="farm-toolbar farm-visit" role="region" aria-label="Thăm nông trại">
@@ -97,6 +110,8 @@ function TopBar() {
           <div className="xp"><div className="xp-fill" style={{ width: `${pct}%` }} /><span>{me.xp}/{me.xpNext} XP</span></div>
         </div>
       </div>
+      {/* Bảng tin chạy chữ: nằm giữa hàng trên cùng */}
+      <div className="topbar-mid"><NewsTicker /></div>
       <div className="top-right">
         {zone && <div className="zone-name">📍 {zone.name}</div>}
         <CoinWithDelta n={me.coins} />
@@ -195,19 +210,23 @@ function MenuButtons() {
     ['tui', '🎒', 'Túi đồ', '#ff9f43'],
     ['messages', '💬', 'Tin nhắn', '#38bdf8'],
     ['friends', '👥', 'Bạn bè', '#a78bfa'],
+    ['residents', '🏘️', 'Cư dân', '#f4845f'],
+    ['quests', '📜', 'Nhiệm vụ', '#f9c74f'],
   ];
-  const badgeOf = (k: Panel | 'farm') => (k === 'friends' ? incoming : k === 'messages' ? unreadTotal : 0);
+  const newsUnread = useStore((s) => s.newsUnread);
+  const questReady = useStore((s) => questClaimable(s.quests));
+  const badgeOf = (k: Panel | 'farm') => (k === 'friends' ? incoming : k === 'messages' ? unreadTotal : k === 'residents' ? newsUnread : k === 'quests' ? questReady : 0);
   return (
     <div className={`world-menu ${expanded ? 'expanded' : ''}`}>
       <button className="menu-toggle" aria-label="Menu trò chơi" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
         <span aria-hidden="true">{expanded ? '✕' : '☰'}</span>
-        {incoming + unreadTotal > 0 && !expanded && <span className="badge">{incoming + unreadTotal}</span>}
+        {incoming + unreadTotal + newsUnread + questReady > 0 && !expanded && <span className="badge">{incoming + unreadTotal + newsUnread + questReady}</span>}
       </button>
       <div className="menu-buttons">
       {btns.map(([k, icon, label, color]) => (
         <button key={label} className="menu-btn" style={{ ['--c' as string]: color }} onClick={() => {
           if (k === 'farm') travel('myfarm');
-          else set({ panel: k });
+          else set(k === 'residents' ? { panel: k, resTab: 'list' } : { panel: k });
           setExpanded(false);
         }}>
           <span className="menu-icon">{icon}</span>
@@ -226,6 +245,11 @@ function ChatBox() {
   const [open, setOpen] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // 🌏 Cộng đồng: cả server thấy · 📍 Tại chỗ: chỉ người cùng khu (bong bóng trên đầu)
+  const [scope, setScope] = useState<'world' | 'local'>(() => {
+    try { return localStorage.getItem('xv_chat_scope') === 'local' ? 'local' : 'world'; } catch { return 'world'; }
+  });
+  const pickScope = (v: 'world' | 'local') => { setScope(v); try { localStorage.setItem('xv_chat_scope', v); } catch { /* bỏ qua */ } };
 
   useEffect(() => { logRef.current?.scrollTo(0, logRef.current.scrollHeight); }, [chat, open]);
 
@@ -233,7 +257,7 @@ function ChatBox() {
     e.preventDefault();
     const t = text.trim();
     if (!t) return;
-    send('chat', { text: t });
+    send('chat', { text: t, scope });
     setText('');
   }
 
@@ -242,24 +266,28 @@ function ChatBox() {
 
   return (
     <div className={`chatbox ${open ? 'open' : 'closed'}`}>
-      <button className="chat-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? '▾ Thu gọn' : '💬 Chat cộng đồng'}</button>
+      <button className="chat-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? '▾ Thu gọn' : '💬 Trò chuyện'}</button>
       {open && (
         <>
           <div className="chat-log" ref={logRef}>
             {chat.map((m) => (
-              <div key={m.id} className={`chat-line ${m.kind}`}>
-                {m.name && <b>{m.name}: </b>}{m.text}
+              <div key={m.id} className={`chat-line ${m.kind} ${m.scope === 'local' ? 'local' : ''}`}>
+                {m.scope === 'local' && <i className="chat-tag">📍</i>}{m.name && <b>{m.name}: </b>}{m.text}
               </div>
             ))}
           </div>
           {showEmo && (
             <div className="emotes">
-              {EMOTES.map((e) => <button key={e} onClick={() => { send('chat', { text: e }); setShowEmo(false); }}>{e}</button>)}
+              {EMOTES.map((e) => <button key={e} onClick={() => { send('chat', { text: e, scope }); setShowEmo(false); }}>{e}</button>)}
             </div>
           )}
+          <div className="chat-scope" role="tablist" aria-label="Phạm vi chat">
+            <button type="button" role="tab" aria-selected={scope === 'world'} className={scope === 'world' ? 'on' : ''} onClick={() => pickScope('world')}>🌏 Cộng đồng</button>
+            <button type="button" role="tab" aria-selected={scope === 'local'} className={scope === 'local' ? 'on' : ''} onClick={() => pickScope('local')}>📍 Tại chỗ</button>
+          </div>
           <form className="chat-input" onSubmit={submit}>
             <button type="button" className="emo-btn" onClick={() => setShowEmo(!showEmo)}>😊</button>
-            <input ref={inputRef} value={text} maxLength={120} onChange={(e) => setText(e.target.value)} placeholder="Nói gì đó với mọi người..."
+            <input ref={inputRef} value={text} maxLength={120} onChange={(e) => setText(e.target.value)} placeholder={scope === 'world' ? 'Nói với cả xóm...' : 'Nói với người quanh đây...'}
               onKeyDown={(e) => { if (e.key === 'Escape') (e.target as HTMLInputElement).blur(); }} />
             <button className="btn small primary" onPointerDown={keepFocus} onMouseDown={keepFocus}>Gửi</button>
           </form>
@@ -275,6 +303,7 @@ function FarmToolbar() {
   const inv = useStore((s) => s.me!.inventory);
   const level = useStore((s) => s.me!.level);
   const seeds = Object.values(CROPS).filter((c) => (inv[`seed:${c.id}`] ?? 0) > 0);
+  const plotCount = useStore((s) => s.farm?.plots.length ?? 0);
   return (
     <div className="farm-toolbar" role="region" aria-label="Công cụ nông trại">
       <div className="farm-tools" role="group" aria-label="Chọn công cụ hoặc hạt giống">
@@ -289,8 +318,12 @@ function FarmToolbar() {
       <button className="tool" onClick={() => set({ panel: 'shop', shopTab: 'seed' })} title="Mua hạt giống">
         <span>＋</span><small>Mua hạt</small>
       </button>
+      <button className={`tool upgrade ${tool === 'upgrade' ? 'active' : ''} ${plotCount < MAX_PLOTS ? 'locked' : ''}`} aria-pressed={tool === 'upgrade'} onClick={() => set({ farmTool: tool === 'upgrade' ? 'auto' : 'upgrade' })}
+        title={`Nâng cấp ô đất: sản lượng ×${ECON.plotUpgradeMult} · ${fmt(ECON.plotUpgradePrice)} xu`}>
+        <span>{plotCount < MAX_PLOTS ? '🔒' : '⬆️'}</span><small>Nâng đất</small>
+      </button>
       </div>
-      <span className="tool-hint" role="status">{tool.startsWith('seed:') ? `Gieo ${CROPS[tool.slice(5)]?.name} · Chạm ô đất trống` : seeds.length ? 'Chạm cây để tưới nước hoặc thu hoạch' : `Hết hạt giống · Ghé cửa hàng để mua thêm · Lv${level}`}</span>
+      <span className="tool-hint" role="status">{tool === 'upgrade' && plotCount < MAX_PLOTS ? `🔒 Mở hết ${MAX_PLOTS} ô đất mới nâng cấp được · đang có ${plotCount}/${MAX_PLOTS}` : tool === 'upgrade' ? `Chạm ô đất để nâng thành ✨ Đất màu mỡ · sản lượng ×${String(ECON.plotUpgradeMult).replace('.', ',')} · ${fmt(ECON.plotUpgradePrice)} xu` : tool.startsWith('seed:') ? `Gieo ${CROPS[tool.slice(5)]?.name} · Chạm ô đất trống` : seeds.length ? 'Chạm cây để tưới nước hoặc thu hoạch' : `Hết hạt giống · Ghé cửa hàng để mua thêm · Lv${level}`}</span>
     </div>
   );
 }

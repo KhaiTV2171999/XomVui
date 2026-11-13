@@ -60,6 +60,24 @@ const SETTINGS: [keyof typeof ECON, string, string][] = [
   ['dailyBonus', 'daily_bonus', 'Quà đăng nhập mỗi ngày (xu)'],
   ['starterCoins', 'starter_coins', 'Xu khởi đầu cho tài khoản mới'],
   ['plotStep', 'plot_step', 'Giá mở ô đất thứ n = plot_step × (n − 4)'],
+  ['policeStaySec', 'police_stay_sec', 'Cảnh sát ở lại mỗi nông trại bao lâu (giây)'],
+  ['policeGapSec', 'police_gap_sec', 'Thời gian cảnh sát di chuyển giữa hai nhà (giây)'],
+  ['policeLookbackSec', 'police_lookback_sec', 'Cảnh sát ập tới: bắt ai đã trộm ở nhà đó trong bao nhiêu giây trước mà còn ở lại'],
+  ['fineBase', 'fine_base', 'Tiền phạt = fine_base × số lần vi phạm (xu)'],
+  ['jailMinPerOffense', 'jail_min_per_offense', 'Lao động công ích = số phút này × số lần vi phạm'],
+  ['jailMaxMin', 'jail_max_min', 'Lao động công ích tối đa (phút)'],
+  ['plotUpgradePrice', 'plot_upgrade_price', 'Giá nâng cấp 1 ô đất thành Đất màu mỡ (xu)'],
+  ['plotUpgradeLevel', 'plot_upgrade_level', 'Cấp tối thiểu để nâng cấp ô đất'],
+  ['plotUpgradeMult', 'plot_upgrade_mult', 'Hệ số sản lượng ô đã nâng cấp (1.5 = ×1,5)'],
+  ['stealSecBase', 'steal_sec_base', 'Trộm: thời gian lượm cơ bản (giây)'],
+  ['stealSecPerItem', 'steal_sec_per_item', 'Trộm: thêm mỗi sản phẩm (giây)'],
+  ['stealAnimalSec', 'steal_animal_sec', 'Bắt trộm vật nuôi: số giây này + giá con vật / 100'],
+  ['dogCatchChance', 'dog_catch_chance', 'Xác suất chó giữ nhà xông ra trong một lần trộm (0–1)'],
+  ['dogFine', 'dog_fine', 'Tiền phạt khi bị chó đuổi (xu, trả cho chủ vườn)'],
+  ['salonHair', 'salon_hair', 'Tiệm thời trang: giá đổi kiểu tóc (xu)'],
+  ['salonColor', 'salon_color', 'Tiệm thời trang: giá nhuộm màu tóc (xu)'],
+  ['salonSkin', 'salon_skin', 'Tiệm thời trang: giá đổi màu da (xu)'],
+  ['resellRate', 'resell_rate', 'Bán lại quần áo / vật phẩm: nhận lại tỉ lệ này của giá mua (0–1)'],
 ];
 
 /** Tạo bảng + nạp giá mặc định nếu bảng còn trống, rồi đọc bảng giá vào bộ nhớ. */
@@ -110,7 +128,11 @@ export async function reloadCatalog() {
   for (const [k, key] of SETTINGS) {
     const v = byKey.get(key);
     if (v == null || !Number.isFinite(v)) continue;
-    payload.econ[k] = k === 'stealKeep' ? Math.min(1, Math.max(0, v)) : Math.max(0, Math.round(v));
+    payload.econ[k] = k === 'stealKeep' ? Math.min(1, Math.max(0, v))
+      : k === 'plotUpgradeMult' ? Math.min(5, Math.max(1, v))
+      : k === 'stealSecPerItem' || k === 'stealSecBase' ? Math.min(60, Math.max(0, v))
+      : k === 'dogCatchChance' ? Math.min(1, Math.max(0, v))
+      : Math.max(0, Math.round(v));
   }
   if (!payload.crops.length) return; // bảng trống/lỗi → giữ giá đang dùng
   const json = JSON.stringify(payload);

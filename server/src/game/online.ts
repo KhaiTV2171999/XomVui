@@ -20,8 +20,19 @@ let io: Server;
 export function setIo(server: Server) { io = server; }
 export function getIo() { return io; }
 
+/** Ai đang lao động công ích tới khi nào (ms). Nạp lúc đăng nhập, ghi khi bị bắt. */
+export const jailUntil = new Map<number, number>();
+/** Số ms lao động công ích còn lại (0 = tự do). */
+export function jailLeft(userId: number) {
+  const t = jailUntil.get(userId);
+  if (!t) return 0;
+  const left = t - Date.now();
+  if (left <= 0) { jailUntil.delete(userId); return 0; }
+  return left;
+}
+
 export function publicPlayer(p: OnlinePlayer) {
-  return { id: p.userId, name: p.name, level: p.level, appearance: p.appearance, x: p.x, y: p.y };
+  return { id: p.userId, name: p.name, level: p.level, appearance: p.appearance, x: p.x, y: p.y, jailed: jailLeft(p.userId) > 0 };
 }
 
 /** Gửi lại toàn bộ thông tin cá nhân (xu, cấp, túi đồ...) cho người chơi. */
@@ -40,6 +51,8 @@ export async function pushMe(userId: number) {
     appearance: prof.appearance,
     created: prof.created,
     inventory,
+    jailUntil: jailLeft(userId) > 0 ? jailUntil.get(userId) : null,
+    offenses: prof.offenses,
   });
 }
 

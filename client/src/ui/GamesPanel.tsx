@@ -8,6 +8,8 @@ interface Overview {
   now: number;
   baucua: { phase: 'betting' | 'rolling' | 'result'; endsAt: number; players: number; pot: number; last: number[] | null; winners: { name: string; win: number }[] };
   tienlen: { tables: number; playing: number; players: number };
+  tower?: { duels: number; waiting: number };
+  werewolf?: { playing: number; waiting: number };
 }
 
 /** Sảnh "Khu giải trí": thông tin trực tiếp từng trò, chọn trò để chơi. */
@@ -54,61 +56,94 @@ export function GamesPanel() {
           </div>
         </div>
 
-        <div className="arcade-grid">
+        <div className="gc-grid">
           {/* Bầu cua */}
-          <button className="game-tile baucua" onClick={() => set({ panel: 'baucua' })}>
-            <span className="ribbon hot">HOT</span>
-            <div className="tile-art">
-              {(bc?.last ?? [0, 1, 3]).map((d, i) => (
-                <span key={i} className={`dice ${bc?.phase === 'rolling' ? 'rolling' : ''}`} style={{ animationDelay: `${i * 0.12}s` }}>{BC_SYMBOLS[d].icon}</span>
-              ))}
+          <button className="gcard baucua" onClick={() => set({ panel: 'baucua' })}>
+            <div className="gc-art">
+              <span className="gc-badge hot">🔥 HOT</span>
+              <div className="gc-dice">
+                {(bc?.last ?? [0, 1, 3]).map((d, i) => (
+                  <span key={i} className={`dice ${bc?.phase === 'rolling' ? 'rolling' : ''}`} style={{ animationDelay: `${i * 0.12}s` }}>{BC_SYMBOLS[d].icon}</span>
+                ))}
+              </div>
             </div>
-            <div className="tile-name">Bầu Cua Tôm Cá</div>
-            <div className="tile-live">
-              {!bc ? 'Đang tải…'
-                : bc.phase === 'betting' ? <><span className="live-dot" />Đang nhận cược · <b>{secs}s</b></>
-                : bc.phase === 'rolling' ? <>🎲 Đang lắc bát…</>
-                : <>✨ Đang trả thưởng</>}
+            <div className="gc-body">
+              <div className="gc-name">Bầu Cua Tôm Cá</div>
+              <div className="gc-tag">Đặt cửa 6 linh vật, lắc bát liên tục</div>
+              <div className="gc-row">
+                <span className="gc-live">
+                  {!bc ? 'Đang tải…'
+                    : bc.phase === 'betting' ? <><span className="live-dot" />Nhận cược · <b>{secs}s</b></>
+                    : bc.phase === 'rolling' ? <>🎲 Đang lắc bát…</>
+                    : <>✨ Trả thưởng</>}
+                </span>
+                <span className="gc-chip">👥 {bc?.players ?? 0}</span>
+                <span className="gc-chip">💰 {fmt(bc?.pot ?? 0)}</span>
+              </div>
+              <span className="gc-play">CHƠI NGAY ▶</span>
             </div>
-            <div className="tile-stats">
-              <span>👥 {bc?.players ?? 0} người cược</span>
-              <span>💰 {fmt(bc?.pot ?? 0)} xu trên bàn</span>
-            </div>
-            <span className="play-btn">CHƠI NGAY ▶</span>
           </button>
 
           {/* Tiến lên */}
-          <button className="game-tile tienlen" onClick={() => set({ panel: 'tienlen' })}>
-            <span className="ribbon new">BOT</span>
-            <div className="tile-art fan">
-              {[['A', '♠', false], ['K', '♥', true], ['Q', '♦', true], ['2', '♣', false]].map(([r, s, red], i) => (
-                <span key={i} className={`mini-card ${red ? 'red' : ''}`} style={{ transform: `rotate(${(i - 1.5) * 14}deg) translateY(${Math.abs(i - 1.5) * 5}px)` }}>
-                  <b>{r as string}</b><i>{s as string}</i>
-                </span>
-              ))}
+          <button className="gcard tienlen" onClick={() => set({ panel: 'tienlen' })}>
+            <div className="gc-art">
+              <span className="gc-badge">🤖 CÓ BOT</span>
+              <div className="gc-fan">
+                {[['A', '♠', false], ['K', '♥', true], ['Q', '♦', true], ['2', '♣', false]].map(([r, su, red], i) => (
+                  <span key={i} className={`mini-card ${red ? 'red' : ''}`} style={{ transform: `rotate(${(i - 1.5) * 14}deg) translateY(${Math.abs(i - 1.5) * 5}px)` }}>
+                    <b>{r as string}</b><i>{su as string}</i>
+                  </span>
+                ))}
+              </div>
             </div>
-            <div className="tile-name">Tiến Lên Miền Nam</div>
-            <div className="tile-live">
-              {tl && tl.playing > 0 ? <><span className="live-dot" />{tl.playing} ván đang diễn ra</> : '🃏 Mở bàn, có bot chơi cùng'}
+            <div className="gc-body">
+              <div className="gc-name">Tiến Lên Miền Nam</div>
+              <div className="gc-tag">Đánh bài 4 người, thiếu người có bot</div>
+              <div className="gc-row">
+                <span className="gc-live">{tl && tl.playing > 0 ? <><span className="live-dot" />{tl.playing} ván đang chơi</> : '🃏 Mở bàn ngay'}</span>
+                <span className="gc-chip">🪑 {tl?.tables ?? 0} bàn</span>
+              </div>
+              <span className="gc-play">CHƠI NGAY ▶</span>
             </div>
-            <div className="tile-stats">
-              <span>🪑 {tl?.tables ?? 0} bàn đang mở</span>
-              <span>👥 {tl?.players ?? 0} người chơi</span>
-            </div>
-            <span className="play-btn">CHƠI NGAY ▶</span>
           </button>
 
-          {[['🀄', 'Phỏm'], ['⭕', 'Cờ Caro']].map(([icon, name]) => (
-            <div key={name} className="game-tile soon">
-              <span className="ribbon soon">SẮP RA MẮT</span>
-              <div className="tile-art"><span className="soon-icon">{icon}</span></div>
-              <div className="tile-name">{name}</div>
-              <div className="tile-live">🔒 Đang xây dựng</div>
-              <span className="play-btn locked">SẮP CÓ</span>
+          {/* Xây nhà cao tầng */}
+          <button className="gcard tower" onClick={() => set({ panel: 'tower' })}>
+            <div className="gc-art">
+              <span className="gc-badge new">✨ MỚI</span>
+              <div className="gc-tower">
+                <i className="gc-block b4 swing" /><i className="gc-block b3" /><i className="gc-block b2" /><i className="gc-block b1" />
+              </div>
             </div>
-          ))}
+            <div className="gc-body">
+              <div className="gc-name">Xây Nhà Cao Tầng</div>
+              <div className="gc-tag">Thả khối thật chuẩn, xây thật cao</div>
+              <div className="gc-row">
+                <span className="gc-live">{ov?.tower && ov.tower.duels > 0 ? <><span className="live-dot" />{ov.tower.duels} trận solo</> : '🏆 Xếp hạng'}</span>
+                <span className="gc-chip">⚔️ {ov?.tower?.waiting ?? 0} phòng chờ</span>
+              </div>
+              <span className="gc-play">CHƠI NGAY ▶</span>
+            </div>
+          </button>
+
+          {/* Ma Sói */}
+          <button className="gcard werewolf" onClick={() => set({ panel: 'werewolf' })}>
+            <div className="gc-art">
+              <span className="gc-badge new">✨ MỚI</span>
+              <div className="gc-ww"><span className="moon" /><span className="wolf">🐺</span></div>
+            </div>
+            <div className="gc-body">
+              <div className="gc-name">Ma Sói</div>
+              <div className="gc-tag">Giấu vai, đoán sói, nói chuyện bằng mic</div>
+              <div className="gc-row">
+                <span className="gc-live">{ov?.werewolf && ov.werewolf.playing > 0 ? <><span className="live-dot" />{ov.werewolf.playing} làng đang chơi</> : '🏘️ Mở làng ngay'}</span>
+                <span className="gc-chip">👥 5–10</span>
+              </div>
+              <span className="gc-play">CHƠI NGAY ▶</span>
+            </div>
+          </button>
         </div>
-        <p className="arcade-note">Chỉ dùng xu ảo trong game · không nạp, không đổi ra tiền thật</p>
+        <p className="arcade-note">🔜 Sắp ra mắt: Cờ Caro · Chỉ dùng xu ảo trong game, không nạp, không đổi ra tiền thật</p>
       </div>
     </div>
   );

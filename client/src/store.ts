@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Appearance } from '../../shared/catalog';
+import type { QuestState } from '../../shared/quests';
 
 export interface Me {
   id: number;
@@ -11,13 +12,18 @@ export interface Me {
   appearance: Appearance;
   created: boolean;
   inventory: Record<string, number>;
+  /** Đang lao động công ích tới (ms) — null = tự do */
+  jailUntil?: number | null;
+  offenses?: number;
 }
 
-export interface PlayerPub { id: number; name: string; level: number; appearance: Appearance; x: number; y: number }
+export interface PlayerPub { id: number; name: string; level: number; appearance: Appearance; x: number; y: number; jailed?: boolean }
 
 export interface PlotData {
   crop: string | null; plantedAt: number; bonus: number; growMs: number;
   waterStage: number; yieldLeft: number; stolenBy: number[];
+  /** 1 = Đất màu mỡ (sản lượng ×1,5) */
+  lvl?: number;
 }
 export interface AnimalData { type: string; fedAt: number | null; produceMs: number; left?: number; stolenBy?: number[] }
 export interface FarmData { now: number; plots: PlotData[]; animals: AnimalData[]; dog?: boolean }
@@ -25,13 +31,16 @@ export interface FarmData { now: number; plots: PlotData[]; animals: AnimalData[
 export interface ZoneInfo {
   zone: string; kind: string; name: string; ownerId: number | null; ownerName: string | null;
   players: PlayerPub[]; farm: FarmData | null;
+  /** Cảnh sát đang có mặt ở nông trại này (tới khi nào) */
+  police?: { until: number } | null;
 }
 
-export interface ChatMsg { id: number; kind: 'chat' | 'system' | 'pm'; name?: string; text: string }
+export interface ChatMsg { id: number; kind: 'chat' | 'system' | 'pm' | 'news'; name?: string; text: string; scope?: 'local' }
+export interface NewsItem { id: number; kind: string; text: string; userId: number | null; at: number }
 export interface Toast { id: number; msg: string; kind: 'info' | 'success' | 'error' }
 export interface FriendRow { id: number; name: string; level: number; online?: boolean; zone?: string | null }
 
-export type Panel = null | 'shop' | 'inventory' | 'kho' | 'tui' | 'wardrobe' | 'friends' | 'messages' | 'map' | 'games' | 'baucua' | 'tienlen' | 'bus';
+export type Panel = null | 'shop' | 'boutique' | 'quests' | 'inventory' | 'kho' | 'tui' | 'residents' | 'wardrobe' | 'friends' | 'messages' | 'map' | 'games' | 'baucua' | 'tienlen' | 'tower' | 'werewolf' | 'bus';
 
 export interface ChatMessage { id: number; from: number; to: number; text: string; at: number; read: boolean; fromName?: string }
 
@@ -63,6 +72,20 @@ interface State {
   gameChat: null | 'community' | 'friends';
   /** Tăng mỗi khi server gửi bảng giá mới → các bảng đang mở tự vẽ lại. */
   catalogVer: number;
+  /** Bảng tin cộng đồng (mới nhất trước) */
+  news: NewsItem[];
+  /** Số tin mới chưa xem trên Bảng tin */
+  newsUnread: number;
+  /** Nhiệm vụ hằng ngày */
+  quests: QuestState | null;
+  /** Mở bảng Cư dân ở tab nào */
+  resTab: 'list' | 'news';
+  /** Đang mở bảng tặng quà cho ai */
+  gift: { id: number; name: string } | null;
+  /** Lời mời vào làng Ma Sói đang chờ trả lời */
+  wwInvite: { roomId: number; fromId: number; fromName: string; count: number } | null;
+  /** Đã nhận lời mời → mở bảng Ma Sói rồi vào làng này */
+  wwJoinId: number | null;
 }
 
 export const useStore = create<State>(() => ({
@@ -87,6 +110,13 @@ export const useStore = create<State>(() => ({
   traveling: false,
   gameChat: null,
   catalogVer: 0,
+  news: [],
+  newsUnread: 0,
+  quests: null,
+  resTab: 'list',
+  gift: null,
+  wwInvite: null,
+  wwJoinId: null,
 }));
 
 export const set = useStore.setState;

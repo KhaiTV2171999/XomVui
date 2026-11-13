@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "migrate:sqlite": "tsx scripts/migrate-sqlite.ts"
+    "migrate:sqlite": "tsx scripts/migrate-sqlite.ts",
+    "migrate": "tsx scripts/migrate.ts"
   },
   "dependencies": {
     "express": "^4.21.1",

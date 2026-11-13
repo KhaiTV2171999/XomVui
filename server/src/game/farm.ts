@@ -1,14 +1,15 @@
 import type { Socket } from 'socket.io';
-import { ANIMALS, CROPS, ITEMS, MAX_ANIMALS, MAX_PLOTS, plotPrice, stealFloor } from '../../../shared/catalog';
+import { ANIMALS, CROPS, ECON, ITEMS, MAX_ANIMALS, MAX_PLOTS, plotPrice, plotYield, stealFloor } from '../../../shared/catalog';
 import {
   addCoins, addItem, addXp, emptyPlot, Farm, GameError, getFarm, getProfile, Plot, removeItem, saveFarm, tx,
 } from '../db';
 import { getIo, handle, OnlinePlayer, pushMe, toast } from './online';
+import { questBump } from './quests';
 
 export const DOG_PRICE = 800;
 export const DOG_LEVEL = 2;
-const DOG_CATCH_CHANCE = 0.5;
-const DOG_FINE = 30;
+export const DOG_CATCH_CHANCE = 0.5;
+export const DOG_FINE = 30;
 
 export function farmPayload(farm: Farm) {
   return {
@@ -21,6 +22,7 @@ export function farmPayload(farm: Farm) {
       waterStage: pl.waterStage,
       yieldLeft: pl.yieldLeft,
       stolenBy: pl.stolenBy,
+      lvl: pl.lvl ?? 0,
     })),
     dog: !!farm.dog,
     animals: farm.animals.map((a) => ({
@@ -38,6 +40,10 @@ function progress(pl: Plot, now = Date.now()) {
   const grow = CROPS[pl.crop].growSec * 1000;
   return Math.min(1, (now - pl.plantedAt + pl.bonus) / grow);
 }
+/** Cây đã chín, thu hoạch được */
+export function plotReady(pl: Plot) {
+  return progress(pl) >= 1;
+}
 function stage(pl: Plot) {
   const pr = progress(pl);
   return pr >= 1 ? 3 : Math.floor(pr * 3);
@@ -48,7 +54,7 @@ function broadcastFarm(ownerId: number, farm: Farm) {
 }
 
 /** Đọc-sửa-ghi nông trại trong 1 transaction (khoá dòng), rồi phát cập nhật cho mọi người trong vườn. */
-async function withFarm<T>(ownerId: number, fn: (farm: Farm) => Promise<T> | T): Promise<T> {
+export async function withFarm<T>(ownerId: number, fn: (farm: Farm) => Promise<T> | T): Promise<T> {
   const r = await tx(async () => {
     const farm = await getFarm(ownerId);
     const res = await fn(farm);
@@ -84,8 +90,9 @@ export function registerFarm(socket: Socket, p: OnlinePlayer) {
       const pl = getPlot(farm, plot);
       if (pl.crop) throw new GameError('Ô đất đã có cây');
       await removeItem(uid, `seed:${crop}`, 1);
-      Object.assign(pl, emptyPlot(), { crop, plantedAt: Date.now(), yieldLeft: c.yield });
+      Object.assign(pl, emptyPlot(), { crop, plantedAt: Date.now(), yieldLeft: plotYield(c.yield, pl.lvl) });
     });
+    questBump(uid, 'plant');
     await pushMe(uid);
   });
 
@@ -102,6 +109,7 @@ export function registerFarm(socket: Socket, p: OnlinePlayer) {
     });
     const r = await addXp(uid, ownerId === uid ? 1 : 2);
     if (ownerId !== uid) {
+      questBump(uid, 'water');
       await addCoins(uid, 5);
       toast(ownerId, `💧 ${p.name} đã tưới cây giúp bạn`, 'info');
     }
@@ -121,77 +129,12 @@ export function registerFarm(socket: Socket, p: OnlinePlayer) {
       return g;
     });
     levelUpNotice(uid, await addXp(uid, gained.xp));
+    questBump(uid, 'harvest');
     await pushMe(uid);
     return gained;
   });
 
-  handle<{ owner: number; plot: number }>(socket, 'farm:steal', async ({ owner, plot }) => {
-    const ownerId = Number(owner);
-    if (ownerId === uid) throw new GameError('Đây là nông trại của bạn');
-    const out = await withFarm(ownerId, async (farm) => {
-      const pl = getPlot(farm, plot);
-      if (!pl.crop || progress(pl) < 1) throw new GameError('Chưa có gì để hái');
-      const c = CROPS[pl.crop];
-      if (pl.stolenBy.includes(uid)) throw new GameError('Bạn đã hái ô này rồi');
-      if (pl.yieldLeft <= stealFloor(c.yield)) throw new GameError('Chủ vườn đã đề phòng, không hái được nữa');
-      pl.stolenBy.push(uid); // bị bắt hay không thì ô này cũng không thử lại được
-      if (farm.dog && Math.random() < DOG_CATCH_CHANCE) {
-        // Chó đuổi: phạt kẻ trộm, tiền phạt về chủ vườn (cùng transaction)
-        const fine = Math.min(DOG_FINE, (await getProfile(uid)).coins);
-        if (fine > 0) { await addCoins(uid, -fine); await addCoins(ownerId, fine); }
-        return { caught: true as const, fine, item: '' };
-      }
-      pl.yieldLeft -= 1;
-      const item = `crop:${c.id}`;
-      await addItem(uid, item, 1);
-      return { caught: false as const, fine: 0, item };
-    });
-    if (out.caught) {
-      getIo().to(`z:farm:${ownerId}`).emit('farm:dogchase', { thiefId: uid, plot: Number(plot) });
-      toast(ownerId, `🐕 Chó nhà bạn vừa đuổi ${p.name} khi đang hái trộm! +${out.fine} xu tiền phạt`, 'success');
-      await Promise.all([pushMe(uid), pushMe(ownerId)]);
-      return { caught: true, fine: out.fine };
-    }
-    toast(ownerId, `😈 ${p.name} vừa hái trộm ${ITEMS[out.item].name} trong vườn bạn!`, 'error');
-    levelUpNotice(uid, await addXp(uid, 1));
-    await pushMe(uid);
-    return { item: out.item };
-  });
-
-  // Trộm sản phẩm vật nuôi (trứng, sữa, len) ở nông trại người khác
-  handle<{ owner: number; idx: number }>(socket, 'farm:stealAnimal', async ({ owner, idx }) => {
-    const ownerId = Number(owner);
-    if (ownerId === uid) throw new GameError('Đây là nông trại của bạn');
-    const out = await withFarm(ownerId, async (farm) => {
-      const an = farm.animals[Number(idx)];
-      if (!an) throw new GameError('Không tìm thấy vật nuôi');
-      const def = ANIMALS[an.type];
-      if (an.fedAt == null || Date.now() < an.fedAt + def.produceSec * 1000) throw new GameError('Chưa có gì để lấy');
-      const left = an.left ?? def.qty;
-      const stolenBy = an.stolenBy ?? [];
-      if (stolenBy.includes(uid)) throw new GameError('Bạn đã lấy lứa này rồi');
-      if (left <= stealFloor(def.qty)) throw new GameError('Chủ chuồng đã đề phòng, không lấy được nữa');
-      an.stolenBy = [...stolenBy, uid];
-      if (farm.dog && Math.random() < DOG_CATCH_CHANCE) {
-        const fine = Math.min(DOG_FINE, (await getProfile(uid)).coins);
-        if (fine > 0) { await addCoins(uid, -fine); await addCoins(ownerId, fine); }
-        return { caught: true as const, fine, item: '' };
-      }
-      an.left = left - 1;
-      await addItem(uid, def.product, 1);
-      return { caught: false as const, fine: 0, item: def.product };
-    });
-    if (out.caught) {
-      getIo().to(`z:farm:${ownerId}`).emit('farm:dogchase', { thiefId: uid, animal: Number(idx) });
-      toast(ownerId, `🐕 Chó nhà bạn vừa đuổi ${p.name} khi đang trộm ở chuồng! +${out.fine} xu tiền phạt`, 'success');
-      await Promise.all([pushMe(uid), pushMe(ownerId)]);
-      return { caught: true, fine: out.fine };
-    }
-    toast(ownerId, `😈 ${p.name} vừa lấy trộm ${ITEMS[out.item].name} trong chuồng nhà bạn!`, 'error');
-    levelUpNotice(uid, await addXp(uid, 1));
-    await pushMe(uid);
-    return { item: out.item };
-  });
+  // Hái trộm / bắt vật nuôi: xem steal.ts (trộm sạch nhưng phải mất thời gian lượm)
 
   handle(socket, 'farm:buyDog', async () => {
     await requireLevel(uid, DOG_LEVEL);
@@ -201,6 +144,27 @@ export function registerFarm(socket: Socket, p: OnlinePlayer) {
       farm.dog = true;
     });
     await pushMe(uid);
+  });
+
+  // Nâng cấp ô đất thành "Đất màu mỡ": sản lượng mỗi vụ ×plotUpgradeMult
+  handle<{ plot: number }>(socket, 'farm:upgradePlot', async ({ plot }) => {
+    await requireLevel(uid, ECON.plotUpgradeLevel);
+    const r = await withFarm(uid, async (farm) => {
+      if (farm.plots.length < MAX_PLOTS) throw new GameError(`Cần mở hết ${MAX_PLOTS} ô đất mới nâng cấp được (đang có ${farm.plots.length})`);
+      const pl = getPlot(farm, plot);
+      if (pl.lvl) throw new GameError('Ô này đã là Đất màu mỡ rồi');
+      await addCoins(uid, -ECON.plotUpgradePrice);
+      pl.lvl = 1;
+      // Cây đang trồng mà chưa ai hái: tăng sản lượng ngay vụ này
+      let boosted = false;
+      if (pl.crop && pl.stolenBy.length === 0 && pl.yieldLeft === CROPS[pl.crop].yield) {
+        pl.yieldLeft = plotYield(CROPS[pl.crop].yield, 1);
+        boosted = true;
+      }
+      return { boosted };
+    });
+    await pushMe(uid);
+    return r;
   });
 
   handle(socket, 'farm:buyPlot', async () => {

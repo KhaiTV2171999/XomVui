@@ -2,7 +2,7 @@
 
 export interface Rect { x: number; y: number; w: number; h: number }
 export interface Portal extends Rect { to: string; label: string; spawn: { x: number; y: number } }
-export type BuildingAction = 'shop' | 'wardrobe' | 'games';
+export type BuildingAction = 'shop' | 'boutique' | 'games';
 export interface Building extends Rect { id: string; label: string; icon: string; style: 'arcade' | 'shop' | 'boutique'; action: BuildingAction }
 /** Trạm xe buýt: người chơi đứng ở (x, y); bánh xe buýt chạm đất ở roadY. */
 export interface BusStop { x: number; y: number; roadY: number }
@@ -35,7 +35,7 @@ export const ZONES: Record<string, ZoneDef> = {
     buildings: [
       { id: 'shop', x: 150, y: 250, w: 380, h: 310, label: 'Cửa hàng', icon: '🛒', style: 'shop', action: 'shop' },
       { id: 'games', x: 760, y: 170, w: 480, h: 390, label: 'Khu giải trí', icon: '🎪', style: 'arcade', action: 'games' },
-      { id: 'wardrobe', x: 1470, y: 250, w: 380, h: 310, label: 'Tiệm thời trang', icon: '👗', style: 'boutique', action: 'wardrobe' },
+      { id: 'wardrobe', x: 1470, y: 250, w: 380, h: 310, label: 'Tiệm thời trang', icon: '👗', style: 'boutique', action: 'boutique' },
     ],
     busStop: { x: 1160, y: 866, roadY: 976 },
     road: { y: 900, h: 110, sidewalk: 54 },
