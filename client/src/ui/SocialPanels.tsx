@@ -136,13 +136,13 @@ export function InventoryPanel({ tab }: { tab: InvTab }) {
   return (
     <Modal title={tab === 'kho' ? '🏚️ Kho nông trại' : '🎒 Túi đồ'} onClose={() => set({ panel: null })} wide className="inv-modal">
       {tab === 'kho'
-        ? <KhoView produce={byKind('produce')} seeds={byKind('seed')} feed={byKind('feed')} />
+        ? <KhoView produce={byKind('produce')} seeds={byKind('seed')} feed={byKind('feed')} mats={byKind('material')} />
         : <TuiView clothes={byKind('clothing')} />}
     </Modal>
   );
 }
 
-function KhoView({ produce, seeds, feed }: { produce: [string, number][]; seeds: [string, number][]; feed: [string, number][] }) {
+function KhoView({ produce, seeds, feed, mats }: { produce: [string, number][]; seeds: [string, number][]; feed: [string, number][]; mats: [string, number][] }) {
   const [busy, setBusy] = useState(false);
   const value = produce.reduce((s, [id, q]) => s + (ITEMS[id].sell ?? 0) * q, 0);
 
@@ -165,7 +165,7 @@ function KhoView({ produce, seeds, feed }: { produce: [string, number][]; seeds:
     if (total) toast(`💰 Đã bán hết nông sản · +${total.toLocaleString('vi-VN')} xu`, 'success');
   }
 
-  if (!produce.length && !seeds.length && !feed.length) {
+  if (!produce.length && !seeds.length && !feed.length && !mats.length) {
     return <div className="inv-empty"><span>🏚️</span><p>Kho đang trống.<br />Mua hạt giống ở cửa hàng, trồng và thu hoạch để đầy kho nhé!</p></div>;
   }
   return (
@@ -197,7 +197,7 @@ function KhoView({ produce, seeds, feed }: { produce: [string, number][]; seeds:
         )}
       </section>
       <div className="kho-side">
-        {([['🌱 Hạt giống', seeds, 'Chọn hạt ở thanh công cụ, chạm ô đất trống để gieo'], ['🌾 Thức ăn', feed, 'Cho vật nuôi trong chuồng ăn']] as [string, [string, number][], string][]).map(([label, list, note]) => (
+        {([['🌱 Hạt giống', seeds, 'Chọn hạt ở thanh công cụ, chạm ô đất trống để gieo'], ['🌾 Thức ăn', feed, 'Cho vật nuôi trong chuồng ăn'], ['🪓 Vật liệu', mats, 'Dọn đá, gốc cây, bụi trên nông trại · dùng để mở rộng đất']] as [string, [string, number][], string][]).map(([label, list, note]) => (
           <section key={label} className="inv-sec inv-card">
             <div className="inv-sec-head"><h4>{label}</h4></div>
             {list.length === 0 ? <p className="inv-note">Chưa có</p> : (

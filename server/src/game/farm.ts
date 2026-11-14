@@ -1,7 +1,8 @@
 import type { Socket } from 'socket.io';
-import { ANIMALS, CROPS, ECON, ITEMS, MAX_ANIMALS, MAX_PLOTS, plotPrice, plotYield, stealFloor } from '../../../shared/catalog';
+import { ANIMAL_MAX_LVL, animalProduceSec, animalQty, animalUpgradeCost, ANIMALS, CROPS, ECON, ITEMS, MAX_ANIMALS, MAX_PLOTS, plotPrice, plotYield, stealFloor } from '../../../shared/catalog';
+import { AreaId, areaCost, FARM_AREAS, maxPlots, OBSTACLES, obstacleActive } from '../../../shared/farmExpand';
 import {
-  addCoins, addItem, addXp, emptyPlot, Farm, GameError, getFarm, getProfile, Plot, removeItem, saveFarm, tx,
+  addCoins, addItem, addXp, emptyPlot, Farm, GameError, getFarm, getProfile, itemQty, Plot, removeItem, saveFarm, tx,
 } from '../db';
 import { getIo, handle, OnlinePlayer, pushMe, toast } from './online';
 import { questBump } from './quests';
@@ -25,11 +26,15 @@ export function farmPayload(farm: Farm) {
       lvl: pl.lvl ?? 0,
     })),
     dog: !!farm.dog,
+    areas: farm.areas ?? [],
+    cleared: farm.cleared ?? {},
+    machines: farm.machines ?? {},
     animals: farm.animals.map((a) => ({
       type: a.type,
       fedAt: a.fedAt,
-      produceMs: ANIMALS[a.type].produceSec * 1000,
-      left: a.left ?? ANIMALS[a.type].qty,
+      produceMs: animalProduceSec(a.type, a.lvl) * 1000,
+      left: a.left ?? animalQty(a.type, a.lvl),
+      lvl: a.lvl ?? 0,
       stolenBy: a.stolenBy ?? [],
     })),
   };
@@ -49,8 +54,17 @@ function stage(pl: Plot) {
   return pr >= 1 ? 3 : Math.floor(pr * 3);
 }
 
+/** Phát nông trại cho mọi người trong vườn — gom các thay đổi sát nhau (bấm nhanh) thành 1 lần gửi sau ~80ms. */
+const farmPending = new Map<number, Farm>();
 function broadcastFarm(ownerId: number, farm: Farm) {
-  getIo().to(`z:farm:${ownerId}`).emit('farm:update', { ownerId, farm: farmPayload(farm) });
+  const had = farmPending.has(ownerId);
+  farmPending.set(ownerId, farm);
+  if (had) return;
+  setTimeout(() => {
+    const f = farmPending.get(ownerId);
+    farmPending.delete(ownerId);
+    if (f) getIo().to(`z:farm:${ownerId}`).emit('farm:update', { ownerId, farm: farmPayload(f) });
+  }, 80);
 }
 
 /** Đọc-sửa-ghi nông trại trong 1 transaction (khoá dòng), rồi phát cập nhật cho mọi người trong vườn. */
@@ -85,7 +99,7 @@ export function registerFarm(socket: Socket, p: OnlinePlayer) {
   handle<{ plot: number; crop: string }>(socket, 'farm:plant', async ({ plot, crop }) => {
     const c = CROPS[crop];
     if (!c) throw new GameError('Hạt giống không hợp lệ');
-    await requireLevel(uid, c.level);
+    if (p.level < c.level) await requireLevel(uid, c.level); // cấp trong bộ nhớ đủ thì khỏi đọc DB
     await withFarm(uid, async (farm) => {
       const pl = getPlot(farm, plot);
       if (pl.crop) throw new GameError('Ô đất đã có cây');
@@ -169,11 +183,75 @@ export function registerFarm(socket: Socket, p: OnlinePlayer) {
 
   handle(socket, 'farm:buyPlot', async () => {
     await withFarm(uid, async (farm) => {
-      if (farm.plots.length >= MAX_PLOTS) throw new GameError('Đã mở hết ô đất');
+      if (farm.plots.length >= maxPlots(farm.areas)) {
+        throw new GameError(farm.areas?.includes('field2') ? 'Đã mở hết ô đất' : 'Đã mở hết ô đất — mở rộng Ruộng mới để có thêm 18 ô');
+      }
       await addCoins(uid, -plotPrice(farm.plots.length));
       farm.plots.push(emptyPlot());
     });
     await pushMe(uid);
+  });
+
+  // Dọn chướng ngại (đá / gốc cây / bụi) trên nông trại của mình → nhận gỗ, đá
+  handle<{ id: number }>(socket, 'farm:clear', async ({ id }) => {
+    const o = OBSTACLES.find((x) => x.id === Number(id));
+    if (!o) throw new GameError('Không có gì để dọn');
+    const loot = await withFarm(uid, async (farm) => {
+      if (!obstacleActive(o.id, farm.areas, farm.cleared)) throw new GameError('Chỗ này đã dọn rồi');
+      farm.cleared = { ...(farm.cleared ?? {}), [o.id]: Date.now() };
+      const items: Record<string, number> = {};
+      const rnd = (a: number, b: number) => a + Math.floor(Math.random() * (b - a + 1));
+      if (o.kind === 'rock') items['mat:stone'] = rnd(2, 3);
+      else if (o.kind === 'stump') items['mat:wood'] = rnd(2, 3);
+      else {
+        items['mat:wood'] = rnd(1, 2);
+        if (Math.random() < 0.35) items['seed:carot'] = rnd(1, 2); // bụi rậm: thỉnh thoảng nhặt được hạt giống
+      }
+      for (const [it, n] of Object.entries(items)) await addItem(uid, it, n);
+      return items;
+    });
+    levelUpNotice(uid, await addXp(uid, 2));
+    await pushMe(uid);
+    return { items: loot };
+  });
+
+  // Mở rộng: mở một khu đất mới (xu + gỗ + đá + cấp)
+  handle<{ id: string }>(socket, 'farm:unlockArea', async ({ id }) => {
+    const area = FARM_AREAS.find((a) => a.id === id);
+    if (!area) throw new GameError('Khu đất không tồn tại');
+    const cost = areaCost(area.id as AreaId);
+    await requireLevel(uid, cost.level);
+    await withFarm(uid, async (farm) => {
+      if (farm.areas?.includes(area.id)) throw new GameError('Khu này đã mở rồi');
+      const [wood, stone] = await Promise.all([itemQty(uid, 'mat:wood'), itemQty(uid, 'mat:stone')]);
+      if (wood < cost.wood || stone < cost.stone) throw new GameError(`Cần ${cost.wood} 🌲 gỗ và ${cost.stone} ⛰️ đá (đang có ${wood} gỗ, ${stone} đá) — dọn chướng ngại để lấy thêm`);
+      await addCoins(uid, -cost.coins);
+      if (cost.wood) await removeItem(uid, 'mat:wood', cost.wood);
+      if (cost.stone) await removeItem(uid, 'mat:stone', cost.stone);
+      farm.areas = [...(farm.areas ?? []), area.id];
+    });
+    levelUpNotice(uid, await addXp(uid, 30));
+    await pushMe(uid);
+    return { area: area.id };
+  });
+
+  // Nâng cấp vật nuôi: mỗi cấp thêm sản phẩm / lứa và ra nhanh hơn
+  handle<{ idx: number }>(socket, 'farm:upgradeAnimal', async ({ idx }) => {
+    const r = await withFarm(uid, async (farm) => {
+      const an = farm.animals[Number(idx)];
+      if (!an) throw new GameError('Không tìm thấy vật nuôi');
+      const lvl = an.lvl ?? 0;
+      if (lvl >= ANIMAL_MAX_LVL) throw new GameError(`${ANIMALS[an.type].name} đã đạt cấp tối đa`);
+      await addCoins(uid, -animalUpgradeCost(an.type, lvl));
+      const fullBefore = an.left == null || (an.left === animalQty(an.type, lvl) && !(an.stolenBy?.length));
+      an.lvl = lvl + 1;
+      // Lứa đang nuôi mà chưa ai trộm: được thêm sản phẩm ngay
+      if (an.fedAt != null && fullBefore) an.left = animalQty(an.type, an.lvl);
+      return { lvl: an.lvl };
+    });
+    levelUpNotice(uid, await addXp(uid, 10));
+    await pushMe(uid);
+    return r;
   });
 
   handle<{ type: string }>(socket, 'farm:buyAnimal', async ({ type }) => {
@@ -195,7 +273,7 @@ export function registerFarm(socket: Socket, p: OnlinePlayer) {
       if (an.fedAt != null) throw new GameError('Vật nuôi đã no');
       await removeItem(uid, 'feed', ANIMALS[an.type].feed);
       an.fedAt = Date.now();
-      an.left = ANIMALS[an.type].qty; // lứa mới: đủ số, chưa ai trộm
+      an.left = animalQty(an.type, an.lvl); // lứa mới: đủ số, chưa ai trộm
       an.stolenBy = [];
     });
     await pushMe(uid);
@@ -206,8 +284,8 @@ export function registerFarm(socket: Socket, p: OnlinePlayer) {
       const an = farm.animals[Number(idx)];
       if (!an) throw new GameError('Không tìm thấy vật nuôi');
       const def = ANIMALS[an.type];
-      if (an.fedAt == null || Date.now() < an.fedAt + def.produceSec * 1000) throw new GameError('Chưa có sản phẩm');
-      const qty = an.left ?? def.qty; // phần còn lại sau khi bị trộm
+      if (an.fedAt == null || Date.now() < an.fedAt + animalProduceSec(an.type, an.lvl) * 1000) throw new GameError('Chưa có sản phẩm');
+      const qty = an.left ?? animalQty(an.type, an.lvl); // phần còn lại sau khi bị trộm
       await addItem(uid, def.product, qty);
       an.fedAt = null;
       an.left = undefined;

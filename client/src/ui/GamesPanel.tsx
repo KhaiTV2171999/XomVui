@@ -26,8 +26,9 @@ export function GamesPanel() {
       setOffset(r.now - Date.now());
     });
     load();
-    const poll = setInterval(load, 2000);
-    const tick = setInterval(() => setNow(Date.now()), 250);
+    // Thưa vừa đủ: đếm giây mỗi 1s, hỏi server mỗi 3s (đỡ tốn pin & mạng trên điện thoại)
+    const poll = setInterval(load, 3000);
+    const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => { clearInterval(poll); clearInterval(tick); };
   }, []);
 

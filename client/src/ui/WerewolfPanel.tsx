@@ -3,7 +3,7 @@ import type { Appearance } from '../../../shared/catalog';
 import { bus, call, send } from '../net';
 import { confirmBox, fmt, get as getStore, set, set as setStore, useStore } from '../store';
 import { AvatarPreview } from './common';
-import { GameChatButton } from './GameChat';
+import { GameChatButton, SayBubble } from './GameChat';
 import { VoiceMesh } from '../voice';
 import { MicTest } from './MicTest';
 import { toast } from '../store';
@@ -228,6 +228,7 @@ function RoomView({ room, meId, voice, onMicTest, onInvite }: { room: WRoom; meI
             return (
               <button key={p.id} className={`ww-player ${p.alive ? '' : 'dead'} ${mine ? 'me' : ''} ${canTarget(p) ? 'can' : ''} ${targeted ? 'picked' : ''} ${voice.speaking.has(p.id) ? 'speaking' : ''}`} onClick={() => pick(p)}>
                 {room.voice.includes(p.id) && <span className="ww-voice-ic" title="Đang bật thoại">{voice.speaking.has(p.id) ? '🗣️' : '🎧'}</span>}
+                <SayBubble uid={p.bot ? null : p.id} />
                 <span className="ww-ava"><AvatarPreview appearance={p.appearance} size={64} />{!p.alive && <i className="ww-skull">💀</i>}</span>
                 <span className="ww-name">{mine ? 'Bạn' : p.name}</span>
                 {p.role && <span className={`ww-role ${p.role}`}>{ROLE[p.role].icon} {ROLE[p.role].name}</span>}

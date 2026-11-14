@@ -1,4 +1,4 @@
-import { GameChatButton } from './GameChat';
+import { GameChatButton, SayBubble } from './GameChat';
 import { memo, useEffect, useRef, useState } from 'react';
 import { bus, call, send } from '../net';
 import { fmt, set, toast, useStore } from '../store';
@@ -177,7 +177,7 @@ function BcTimer({ phase, endsAt, offset }: { phase: BcState['phase']; endsAt: n
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (phase !== 'betting') return;
-    const t = setInterval(() => setNow(Date.now()), 250);
+    const t = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(t);
   }, [phase]);
   const betting = phase === 'betting';
@@ -224,6 +224,7 @@ const BcPlayers = memo(function BcPlayers({ seated, meId }: { seated: NonNullabl
     <div className="bc-players">
       {seated.map((p) => (
         <div key={p.id} className={`bc-player ${p.id === meId ? 'me' : ''}`} title={p.name}>
+          <SayBubble uid={p.id} />
           <div className="seat-ava"><AvatarPreview appearance={p.appearance} size={88} /></div>
           <small>{p.id === meId ? 'Bạn' : p.name}</small>
           {p.bet > 0 && <span className="pbet">{p.bet >= 1000 ? `${(p.bet / 1000).toFixed(p.bet % 1000 ? 1 : 0)}K` : p.bet}</span>}

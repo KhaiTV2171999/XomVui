@@ -1,4 +1,4 @@
-import { GameChatButton } from './GameChat';
+import { GameChatButton, SayBubble } from './GameChat';
 import { useEffect, useMemo, useState } from 'react';
 import type { Appearance } from '../../../shared/catalog';
 import { analyze, beats, Combo, COMBO_NAMES, RANKS, rankOf, suitOf, SUITS } from '../../../shared/tienlen';
@@ -209,6 +209,7 @@ function TableView({ table, meId, onClose }: { table: TableState; meId: number; 
               {s ? (
                 <>
                   <div className="seat-ava"><AvatarPreview appearance={s.appearance} size={96} /></div>
+                  <SayBubble uid={s.userId} />
                   <div className="seat-info">
                     <div className="tl-seat-name">{s.kind === 'bot' ? '🤖 ' : ''}{s.name}</div>
                     {table.playing && <div className="tl-count"><span className="card-back" /> {s.count} lá</div>}
@@ -261,6 +262,7 @@ function TableView({ table, meId, onClose }: { table: TableState; meId: number; 
       </div>
 
       <div className={`tl-me ${myTurn ? 'turn' : ''}`}>
+        <SayBubble uid={table.seats[table.mySeat]?.userId} />
         {myTurn && <TimerBar endsAt={table.turnEndsAt} offset={offset} max={20} />}
         {!table.playing && resultOf(table.mySeat) && resultOf(table.mySeat)!.left.length > 0 && <SeatReveal row={resultOf(table.mySeat)!} stake={table.stake} mine />}
         <div className="tl-hand">
@@ -269,9 +271,9 @@ function TableView({ table, meId, onClose }: { table: TableState; meId: number; 
         </div>
         {table.playing && (
           <div className="tl-actions">
+            <button className="tl-btn red tl-pass" disabled={!myTurn || !table.current} onClick={() => call('tl:pass')}>Bỏ lượt</button>
             <span className="tl-combo">{sel.length ? (combo ? COMBO_NAMES[combo.type] : 'Không hợp lệ') : myTurn ? 'Tới lượt bạn!' : 'Chờ lượt...'}</span>
             <button className="tl-btn gray" disabled={!sel.length} onClick={() => setSel([])}>Bỏ chọn</button>
-            <button className="tl-btn red" disabled={!myTurn || !table.current} onClick={() => call('tl:pass')}>Bỏ lượt</button>
             <button className="tl-btn gold" disabled={!canPlay} onClick={play}>ĐÁNH ▶</button>
           </div>
         )}

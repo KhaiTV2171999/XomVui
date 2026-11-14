@@ -1,5 +1,5 @@
 import type { Socket } from 'socket.io';
-import { ANIMALS, CROPS, ECON, ITEMS, MAX_ANIMALS } from '../../../shared/catalog';
+import { animalProduceSec, animalQty, ANIMALS, CROPS, ECON, ITEMS, MAX_ANIMALS } from '../../../shared/catalog';
 import { addCoins, addItem, addXp, emptyPlot, GameError, getFarm, getProfile } from '../db';
 import { plotReady, withFarm } from './farm';
 import { getIo, handle, online, OnlinePlayer, pushMe, toast } from './online';
@@ -81,8 +81,8 @@ export function registerSteal(socket: Socket, p: OnlinePlayer) {
       const def = ANIMALS[an.type];
       animalType = an.type;
       if (kind === 'produce') {
-        const left = an.left ?? def.qty;
-        if (an.fedAt == null || Date.now() < an.fedAt + def.produceSec * 1000 || left <= 0) throw new GameError('Chưa có gì để lấy');
+        const left = an.left ?? animalQty(an.type, an.lvl);
+        if (an.fedAt == null || Date.now() < an.fedAt + animalProduceSec(an.type, an.lvl) * 1000 || left <= 0) throw new GameError('Chưa có gì để lấy');
         qty = left; name = def.productName;
       } else {
         const mine = await getFarm(uid);
@@ -162,7 +162,7 @@ async function finish(job: Job) {
       if (!an || an.type !== job.animalType) throw new GameError('Con vật không còn ở đó');
       const def = ANIMALS[an.type];
       if (job.kind === 'produce') {
-        const qty = an.left ?? def.qty;
+        const qty = an.left ?? animalQty(an.type, an.lvl);
         if (an.fedAt == null || qty <= 0) throw new GameError('Chủ chuồng đã thu mất rồi');
         await addItem(uid, def.product, qty);
         an.fedAt = null; an.left = undefined; an.stolenBy = []; // lứa bị lấy sạch → phải cho ăn lại
@@ -172,7 +172,7 @@ async function finish(job: Job) {
       farm.animals.splice(job.idx, 1);
       await withFarm(uid, (mine) => {
         if (mine.animals.length >= MAX_ANIMALS) throw new GameError('Chuồng nhà bạn đã đầy');
-        mine.animals.push({ type: an.type, fedAt: null });
+        mine.animals.push({ type: an.type, fedAt: null, lvl: an.lvl });
       });
       return { item: '', qty: 1, value: def.price, text: `con ${def.icon} ${def.name}` };
     });

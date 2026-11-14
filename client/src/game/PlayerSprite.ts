@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { rideSpeed, type Appearance } from '../../../shared/catalog';
 import { AV_H, AV_W, appearanceKey, drawAvatar, FOOT_Y, IDLE, rideLift, WALK } from '../avatar/draw';
 import { sfx } from '../sound';
+import { boostFps } from './fps';
 import { FONT, fontMetrics } from './mapArt';
 
 const TEX_SCALE = 2;
@@ -101,6 +102,8 @@ export class PlayerSprite extends Phaser.GameObjects.Container {
     if (Math.abs(dx) > 4) this.body2.setFlipX(dx < 0);
     // đi lên (ra xa người xem) → quay lưng
     this.facingBack = dy < 0 && Math.abs(dy) > Math.abs(dx) * 0.6;
+    // Nhân vật mình đang đi: chạy 60 khung hình/giây suốt quãng đường cho mượt
+    if (this.isMe) boostFps((dist / (WALK_SPEED * this.speedMul)) * 1000 + 600);
     this.startWalk();
     this.moveTween = this.scene.tweens.add({
       targets: this, x, y,

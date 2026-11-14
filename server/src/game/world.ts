@@ -6,6 +6,10 @@ import { getIo, handle, jailLeft, online, OnlinePlayer, publicPlayer } from './o
 import { policeInfo } from './police';
 import { cancelSteal } from './steal';
 import { questBump } from './quests';
+import { tienlenMates } from './tienlen';
+import { towerMates } from './tower';
+import { werewolfMates } from './werewolf';
+import { baucuaMates } from './baucua';
 
 const room = (zone: string) => `z:${zone}`;
 
@@ -115,6 +119,27 @@ export function registerWorld(socket: Socket, p: OnlinePlayer) {
   });
 
   handle(socket, 'chat:history', () => ({ messages: recentChat }));
+
+  // Chat tại bàn: chỉ những người cùng bàn / cùng phòng trong khu giải trí thấy (không lên chat cộng đồng)
+  handle<{ text: string; game: string }>(socket, 'chat:game', ({ text, game }) => {
+    const now = Date.now();
+    if (now - p.lastChat < 700) throw new GameError('Bạn chat nhanh quá!');
+    const t = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (!t) return;
+    let mates: number[] | null;
+    if (game === 'tienlen') mates = tienlenMates(p.userId);
+    else if (game === 'tower') mates = towerMates(p.userId);
+    else if (game === 'baucua') mates = baucuaMates();
+    else if (game === 'werewolf') {
+      const m = werewolfMates(p.userId);
+      if (m === 'playing') throw new GameError('Đang chơi Ma Sói — hãy nói bằng mic nhé 🎙️');
+      mates = m;
+    } else mates = null;
+    if (!mates || !mates.includes(p.userId)) throw new GameError('Bạn chưa vào bàn nào');
+    p.lastChat = now;
+    const msg = { id: p.userId, name: p.name, text: t, at: now, game };
+    for (const uid of new Set(mates)) online.get(uid)?.socket.emit('game:chat', msg);
+  });
 }
 
 const recentChat: { id: number; name: string; text: string; at: number }[] = [];

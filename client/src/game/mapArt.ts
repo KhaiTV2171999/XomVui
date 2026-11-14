@@ -104,7 +104,9 @@ export function building(scene: S, b: Building, onClick: () => void, out: Obj[])
   const signY = b.style === 'arcade' ? b.y + b.h * 0.13 : b.y + b.h * 0.36 + 10;
   const { board, t } = signLabel(scene, b.x + b.w / 2, signY, `${b.icon} ${b.label}`, out, b.y + b.h + 1);
   const scaleX = board.scaleX, scaleY = board.scaleY;
-  img.setInteractive({ useHandCursor: true, pixelPerfect: true, alphaTolerance: 10 });
+  // Vùng chạm: thân toà nhà (bỏ phần mái trong suốt phía trên). Không dùng pixelPerfect — phải đọc điểm ảnh từ GPU liên tục, rất tốn pin.
+  const fw = img.frame.width, fh = img.frame.height;
+  img.setInteractive({ hitArea: new Phaser.Geom.Rectangle(fw * 0.06, fh * 0.12, fw * 0.88, fh * 0.88), hitAreaCallback: Phaser.Geom.Rectangle.Contains, useHandCursor: true });
   img.on('pointerover', () => { img.setTint(0xfff6e0); scene.tweens.killTweensOf([board, t]); scene.tweens.add({ targets: board, scaleX: scaleX * 1.03, scaleY: scaleY * 1.03, duration: 140 }); scene.tweens.add({ targets: t, scale: 1.03, duration: 140 }); });
   img.on('pointerout', () => { img.clearTint(); scene.tweens.killTweensOf([board, t]); scene.tweens.add({ targets: board, scaleX, scaleY, duration: 140 }); scene.tweens.add({ targets: t, scale: 1, duration: 140 }); });
   img.on('pointerdown', onClick);
@@ -114,7 +116,7 @@ export function portalSign(scene: S, p: Portal, onClick: () => void, out: Obj[])
   const cx = p.x + p.w / 2;
   const cy = p.y + p.h / 2;
   const glow = scene.add.ellipse(cx, cy, p.w + 50, Math.min(p.h, 120), 0xfff3b0, 0.4).setDepth(-700);
-  scene.tweens.add({ targets: glow, alpha: 0.12, scale: 1.1, duration: 1100, yoyo: true, repeat: -1 });
+  scene.tweens.add({ targets: glow, alpha: 0.28, scale: 1.05, duration: 2200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
   out.push(glow);
   const left = p.x < 100;
   const sx = left ? p.x + 110 : p.x - 50;
@@ -156,7 +158,8 @@ export function butterflies(scene: S, area: { x: number; y: number; w: number; h
   for (let i = 0; i < n; i++) {
     const b = scene.add.image(area.x + Math.random() * area.w, area.y + Math.random() * area.h, 'butterfly').setDepth(8500);
     if (i % 2) b.setTint(0xfff3a0);
-    scene.tweens.add({ targets: b, scaleX: 0.3, duration: 120, yoyo: true, repeat: -1 });
+    // Vỗ cánh chậm, biên độ nhỏ (đỡ nhấp nháy)
+    scene.tweens.add({ targets: b, scaleX: 0.6, duration: 420, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     const fly = () => {
       scene.tweens.add({
         targets: b, x: area.x + Math.random() * area.w, y: area.y + Math.random() * area.h,

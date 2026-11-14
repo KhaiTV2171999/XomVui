@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import type { Appearance } from '../../../shared/catalog';
 import { call } from '../net';
-import { get, NewsItem, set, useStore } from '../store';
+import { confirmBox, fmt, get, NewsItem, set, toast, useStore } from '../store';
 import { AvatarPreview, Modal } from './common';
 
 interface Resident {
@@ -115,16 +115,35 @@ function NewsBoard() {
       setLoaded(true);
     });
   }, []);
-  if (!loaded && !news.length) return <p className="empty">Đang tải…</p>;
-  if (!news.length) return <p className="empty">Bảng tin chưa có gì 📭</p>;
+  const bails = useStore((s) => s.bails);
+  const meId = useStore((s) => s.me?.id);
+  const bailBox = bails.length > 0 && (
+    <div className="bail-list">
+      <h4>🙏 Đang xin bảo lãnh</h4>
+      {bails.map((b) => (
+        <div key={b.id} className="bail-row">
+          <span className="bail-ic">🧹</span>
+          <div className="bail-info"><b>{b.name}</b><small>còn {Math.max(1, Math.ceil((b.until - Date.now()) / 60000))} phút lao động công ích</small></div>
+          {b.id === meId ? <span className="chip">Lời xin của bạn</span>
+            : <button className="btn small bail-pay" onClick={() => confirmBox(`Nộp ${fmt(b.price)} xu bảo lãnh cho ${b.name}? (tiền nộp cho hệ thống)`, async () => {
+                const r = await call('bail:pay', { id: b.id });
+                if (r.ok) toast(`🤝 Đã bảo lãnh cho ${b.name}`, 'success');
+              })}>🤝 Bảo lãnh · {fmt(b.price)}</button>}
+        </div>
+      ))}
+    </div>
+  );
+  if (!loaded && !news.length) return <>{bailBox}<p className="empty">Đang tải…</p></>;
+  if (!news.length) return <>{bailBox}<p className="empty">Bảng tin chưa có gì 📭</p></>;
   // (Tin quá 3 ngày được server tự xoá)
   return (
     <div className="news-list">
+      {bailBox}
       {news.map((n) => (
         <div key={n.id} className={`news-item ${n.kind}`}>
-          <span className="news-icon">{n.kind === 'police' ? '🚨' : n.kind === 'newbie' ? '🎉' : '📢'}</span>
+          <span className="news-icon">{n.kind === 'police' ? '🚨' : n.kind === 'newbie' ? '🎉' : n.kind === 'bail' ? '🤝' : '📢'}</span>
           <div className="news-text">
-            <p>{n.text.replace(/^(🚨|🎉|📢)\s*/u, '')}</p>
+            <p>{n.text.replace(/^(🚨|🎉|📢|🙏|🤝)\s*/u, '')}</p>
             <small>{ago(n.at)}</small>
           </div>
         </div>
@@ -142,6 +161,7 @@ export function JailBanner() {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [until]);
+  const asked = useStore((s) => s.bails.some((b) => b.id === s.me?.id));
   if (!until || until <= now) return null;
   const s = Math.ceil((until - now) / 1000);
   const mm = Math.floor(s / 60), ss = s % 60;
@@ -149,6 +169,11 @@ export function JailBanner() {
     <div className="jail-banner" role="status">
       🧹 Đang lao động công ích ở Công viên · còn <b>{mm}:{String(ss).padStart(2, '0')}</b>
       <small>Không được về nhà hay vào khu giải trí</small>
+      {asked ? <small className="bail-sent">🙏 Đã xin bảo lãnh — chờ cư dân giúp đỡ</small>
+        : <button className="btn tiny bail-ask" onClick={async () => {
+            const r = await call('bail:request');
+            if (r.ok) toast(`🙏 Đã đăng lời xin bảo lãnh (${fmt(r.price as number)} xu) lên Bảng tin`, 'success');
+          }}>🙏 Xin bảo lãnh</button>}
     </div>
   );
 }

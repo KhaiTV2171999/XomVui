@@ -63,6 +63,12 @@ const SETTINGS: [keyof typeof ECON, string, string][] = [
   ['policeStaySec', 'police_stay_sec', 'Cảnh sát ở lại mỗi nông trại bao lâu (giây)'],
   ['policeGapSec', 'police_gap_sec', 'Thời gian cảnh sát di chuyển giữa hai nhà (giây)'],
   ['policeLookbackSec', 'police_lookback_sec', 'Cảnh sát ập tới: bắt ai đã trộm ở nhà đó trong bao nhiêu giây trước mà còn ở lại'],
+  ['policeGraceSec', 'police_grace_sec', 'Cảnh sát vừa tới: kẻ trộm có bấy nhiêu giây để chạy khỏi nông trại'],
+  ['policeCatchChance', 'police_catch_chance', 'Tỉ lệ cảnh sát bắt được kẻ trộm còn nán lại (0–1)'],
+  ['policeIdleChance', 'police_idle_chance', 'Tỉ lệ một lượt cảnh sát nghỉ, không đi tuần (0–1)'],
+  ['bailPerMin', 'bail_per_min', 'Bảo lãnh: giá mỗi phút lao động công ích còn lại (xu)'],
+  ['bailMin', 'bail_min', 'Bảo lãnh: giá tối thiểu (xu)'],
+  ['bailCooldownMin', 'bail_cooldown_min', 'Bảo lãnh: mỗi lần xin cách nhau tối thiểu (phút)'],
   ['fineBase', 'fine_base', 'Tiền phạt = fine_base × số lần vi phạm (xu)'],
   ['jailMinPerOffense', 'jail_min_per_offense', 'Lao động công ích = số phút này × số lần vi phạm'],
   ['jailMaxMin', 'jail_max_min', 'Lao động công ích tối đa (phút)'],
@@ -78,6 +84,30 @@ const SETTINGS: [keyof typeof ECON, string, string][] = [
   ['salonColor', 'salon_color', 'Tiệm thời trang: giá nhuộm màu tóc (xu)'],
   ['salonSkin', 'salon_skin', 'Tiệm thời trang: giá đổi màu da (xu)'],
   ['resellRate', 'resell_rate', 'Bán lại quần áo / vật phẩm: nhận lại tỉ lệ này của giá mua (0–1)'],
+  ['field2Level', 'field2_level', 'Mở rộng: Ruộng mới (18 ô) — cấp tối thiểu'],
+  ['field2Coins', 'field2_coins', 'Mở rộng: Ruộng mới — giá xu'],
+  ['field2Wood', 'field2_wood', 'Mở rộng: Ruộng mới — số gỗ'],
+  ['field2Stone', 'field2_stone', 'Mở rộng: Ruộng mới — số đá'],
+  ['yardLevel', 'yard_level', 'Mở rộng: Sân xưởng — cấp tối thiểu'],
+  ['yardCoins', 'yard_coins', 'Mở rộng: Sân xưởng — giá xu'],
+  ['yardWood', 'yard_wood', 'Mở rộng: Sân xưởng — số gỗ'],
+  ['yardStone', 'yard_stone', 'Mở rộng: Sân xưởng — số đá'],
+  ['obstacleRegrowH', 'obstacle_regrow_h', 'Chướng ngại (đá, gốc cây, bụi) mọc lại sau bao nhiêu giờ'],
+  ['animalUpgradeCost', 'animal_upgrade_cost', 'Nâng cấp vật nuôi: giá = giá con vật × hệ số này × (cấp hiện tại + 1)²'],
+  ['animalUpgradeMult', 'animal_upgrade_mult', 'Nâng cấp vật nuôi: mỗi cấp nhân sản lượng / lứa lên bao nhiêu lần (2 = ×2)'],
+  ['animalUpgradeSpeed', 'animal_upgrade_speed', 'Nâng cấp vật nuôi: mỗi cấp nhanh hơn bao nhiêu (0.15 = 15%)'],
+  ['orderSlots', 'order_slots', 'Bảng đơn hàng: số ô đơn'],
+  ['orderBonus', 'order_bonus', 'Bảng đơn hàng: đơn trả gấp bao nhiêu lần giá bán thẳng'],
+  ['orderVipChance', 'order_vip_chance', 'Bảng đơn hàng: tỉ lệ đơn VIP thưởng ×2 (0–1)'],
+  ['orderRefillMin', 'order_refill_min', 'Bảng đơn hàng: giao xong, đơn mới tới sau bao nhiêu phút'],
+  ['orderSkipMin', 'order_skip_min', 'Bảng đơn hàng: bỏ qua, đơn mới tới sau bao nhiêu phút'],
+  ['playerOrderPay', 'player_order_pay', 'Đơn cư dân: người đặt trả tỉ lệ này của giá trị đơn (0.8 = 80%, hệ thống bù phần còn lại)'],
+  ['playerOrderUnlock', 'player_order_unlock', 'Đơn cư dân: số đơn dân làng phải giao để mở khoá tự đăng đơn'],
+  ['playerOrderMax', 'player_order_max', 'Đơn cư dân: số đơn đang mở tối đa mỗi người'],
+  ['woodPrice', 'wood_price', 'Cửa hàng nông trại: giá mua 1 gỗ (xu)'],
+  ['stonePrice', 'stone_price', 'Cửa hàng nông trại: giá mua 1 đá (xu)'],
+  ['matSellRate', 'mat_sell_rate', 'Bán lại gỗ / đá được tỉ lệ này của giá mua (0–1)'],
+  ['playerOrderHours', 'player_order_hours', 'Đơn cư dân: hết hạn sau bao nhiêu giờ (hoàn tiền)'],
 ];
 
 /** Tạo bảng + nạp giá mặc định nếu bảng còn trống, rồi đọc bảng giá vào bộ nhớ. */
@@ -103,6 +133,9 @@ export async function initCatalog() {
 }
 
 let lastJson = '';
+
+/** Thông số được phép là số thập phân (không làm tròn) */
+const FRACTIONAL = new Set<string>(['animalUpgradeCost', 'animalUpgradeMult', 'obstacleRegrowH', 'orderBonus', 'orderRefillMin', 'orderSkipMin']);
 
 /** Đọc lại bảng giá từ DB; nếu có thay đổi thì áp dụng và đẩy xuống mọi client. */
 export async function reloadCatalog() {
@@ -131,7 +164,8 @@ export async function reloadCatalog() {
     payload.econ[k] = k === 'stealKeep' ? Math.min(1, Math.max(0, v))
       : k === 'plotUpgradeMult' ? Math.min(5, Math.max(1, v))
       : k === 'stealSecPerItem' || k === 'stealSecBase' ? Math.min(60, Math.max(0, v))
-      : k === 'dogCatchChance' ? Math.min(1, Math.max(0, v))
+      : k === 'dogCatchChance' || k === 'resellRate' || k === 'animalUpgradeSpeed' || k === 'orderVipChance' || k === 'playerOrderPay' || k === 'matSellRate' || k === 'policeCatchChance' || k === 'policeIdleChance' ? Math.min(1, Math.max(0, v))
+      : FRACTIONAL.has(k) ? Math.max(0, v)
       : Math.max(0, Math.round(v));
   }
   if (!payload.crops.length) return; // bảng trống/lỗi → giữ giá đang dùng

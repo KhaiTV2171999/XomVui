@@ -48,21 +48,25 @@ export function startPolice() {
 
 function nextStop() {
   try {
-    const target = pickFarm();
-    if (target == null) { setTimeout(nextStop, 15_000); return; }
+    const target = Math.random() < ECON.policeIdleChance ? null : pickFarm();
+    if (target == null) { setTimeout(nextStop, Math.max(15, ECON.policeGapSec / 2) * 1000); return; }
     const stay = Math.max(5, ECON.policeStaySec) * 1000 * (0.7 + Math.random() * 0.6);
     patrol = { ownerId: target, until: Date.now() + stay };
     lastOwner = target;
     getIo().to(farmRoom(target)).emit('police:arrive', { until: patrol.until });
-    // Ập tới bất ngờ: bắt kẻ vừa trộm ở đây mà còn nán lại
+    // Còi hú: kẻ trộm có vài giây để chạy; sau đó ai vừa trộm mà còn nán lại thì có thể bị bắt
     const since = Date.now() - ECON.policeLookbackSec * 1000;
-    for (const p of online.values()) {
-      if (p.zone !== `farm:${target}` || p.userId === target) continue;
-      const stealing = jobsAt(target).some((j) => j.thief.userId === p.userId);
-      if (stealing || (thefts.get(p.userId) ?? []).some((t) => t.ownerId === target && t.at >= since)) {
-        arrest(p, target).catch((e) => console.error('[police]', e));
+    setTimeout(() => {
+      if (patrol?.ownerId !== target) return;
+      for (const p of online.values()) {
+        if (p.zone !== `farm:${target}` || p.userId === target) continue;
+        const stealing = jobsAt(target).some((j) => j.thief.userId === p.userId);
+        const recent = (thefts.get(p.userId) ?? []).some((t) => t.ownerId === target && t.at >= since);
+        if ((stealing || recent) && Math.random() < ECON.policeCatchChance) {
+          arrest(p, target).catch((e) => console.error('[police]', e));
+        }
       }
-    }
+    }, Math.max(0, ECON.policeGraceSec) * 1000);
     setTimeout(() => {
       if (patrol?.ownerId === target) getIo().to(farmRoom(target)).emit('police:leave', {});
       patrol = null;
@@ -81,7 +85,7 @@ function pickFarm(): number | null {
   for (const p of online.values()) {
     if (!p.zone?.startsWith('farm:')) continue;
     const owner = Number(p.zone.slice(5));
-    weight.set(owner, (weight.get(owner) ?? 1) + (p.userId === owner ? 0 : 3));
+    weight.set(owner, (weight.get(owner) ?? 1) + (p.userId === owner ? 0 : 1));
   }
   if (weight.size > 1 && lastOwner != null) weight.delete(lastOwner); // ít khi quay lại ngay nhà vừa đi
   const total = [...weight.values()].reduce((a, b) => a + b, 0);
@@ -133,7 +137,8 @@ export async function arrest(thief: OnlinePlayer, ownerId: number) {
       if (p) joinZone(p, 'park', 'login').catch((e) => console.error('[police]', e));
     }, 1800);
     setTimeout(() => {
-      if ((jailUntil.get(uid) ?? 0) <= Date.now()) {
+      const t = jailUntil.get(uid);
+      if (t && t <= Date.now()) { // (đã được bảo lãnh thì t không còn → bỏ qua)
         jailUntil.delete(uid);
         toast(uid, '✅ Bạn đã hoàn thành lao động công ích — giờ có thể về nhà rồi!', 'success');
         pushMe(uid).catch(() => {});

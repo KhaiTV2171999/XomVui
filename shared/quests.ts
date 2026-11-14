@@ -1,6 +1,6 @@
 // Nhiệm vụ hằng ngày (dùng chung client + server). Làm mới mỗi ngày theo giờ Việt Nam.
 
-export type QuestKind = 'harvest' | 'plant' | 'water' | 'gift' | 'play' | 'chat' | 'visit';
+export type QuestKind = 'harvest' | 'plant' | 'water' | 'gift' | 'play' | 'chat' | 'visit' | 'order';
 
 export interface QuestReward {
   coins?: number;
@@ -23,6 +23,7 @@ export const DAILY_QUESTS: QuestDef[] = [
   { id: 'harvest', icon: '🌾', title: 'Thu hoạch 3 ô đất', goal: 3, reward: { coins: 80, xp: 10 }, hint: 'Ra nông trại, chạm vào cây đã chín' },
   { id: 'plant', icon: '🌱', title: 'Gieo 5 hạt giống', goal: 5, reward: { items: { 'seed:ngo': 3 }, xp: 5 }, hint: 'Chọn hạt ở thanh công cụ rồi chạm ô đất trống' },
   { id: 'water', icon: '💧', title: 'Tưới cây giúp hàng xóm 3 lần', goal: 3, reward: { coins: 60, xp: 10 }, hint: 'Ghé nông trại người khác và tưới cây đang lớn' },
+  { id: 'order', icon: '🚚', title: 'Giao 2 đơn hàng', goal: 2, reward: { coins: 120, xp: 15 }, hint: 'Mở 🚚 Đơn hàng trên nông trại, đủ hàng thì bấm Giao' },
   { id: 'visit', icon: '🏡', title: 'Ghé thăm 2 nông trại hàng xóm', goal: 2, reward: { coins: 50 }, hint: 'Mở Cư dân → chọn người → Thăm nông trại' },
   { id: 'gift', icon: '🎁', title: 'Tặng quà cho 1 cư dân', goal: 1, reward: { coins: 100, items: { feed: 5 } }, hint: 'Kết bạn rồi bấm 🎁 Tặng quà trong hồ sơ của họ' },
   { id: 'play', icon: '🎪', title: 'Chơi 2 ván ở Khu giải trí', goal: 2, reward: { coins: 100, xp: 10 }, hint: 'Bầu cua, Tiến lên, Xây nhà hay Ma Sói đều được' },

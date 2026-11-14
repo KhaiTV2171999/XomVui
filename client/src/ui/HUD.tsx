@@ -8,6 +8,9 @@ import { ShopPanel } from './ShopPanel';
 import { WardrobePanel } from './Wardrobe';
 import { BoutiquePanel } from './StorePanels';
 import { QuestPanel, questClaimable } from './QuestPanel';
+import { ExpandPanel } from './ExpandPanel';
+import { WorkshopPanel } from './WorkshopPanel';
+import { loadOrders, OrdersPanel } from './OrdersPanel';
 import { FriendsPanel, InventoryPanel, PlayerCard } from './SocialPanels';
 import { BauCuaPanel } from './BauCuaPanel';
 import { TienLenPanel } from './TienLenPanel';
@@ -45,6 +48,9 @@ export function HUD() {
       {panel === 'wardrobe' && <WardrobePanel />}
       {panel === 'boutique' && <BoutiquePanel />}
       {panel === 'quests' && <QuestPanel />}
+      {panel === 'expand' && <ExpandPanel />}
+      {panel === 'workshop' && <WorkshopPanel />}
+      {panel === 'orders' && <OrdersPanel />}
       {(panel === 'kho' || panel === 'inventory') && <InventoryPanel tab="kho" />}
       {panel === 'tui' && <InventoryPanel tab="tui" />}
       {panel === 'residents' && <ResidentsPanel />}
@@ -245,7 +251,7 @@ function ChatBox() {
   const [open, setOpen] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  // 🌏 Cộng đồng: cả server thấy · 📍 Tại chỗ: chỉ người cùng khu (bong bóng trên đầu)
+  // 🌏 Cộng đồng: cả server thấy (khung chat) · 📍 Tại chỗ: chỉ là bong bóng trên đầu nhân vật, người cùng khu thấy
   const [scope, setScope] = useState<'world' | 'local'>(() => {
     try { return localStorage.getItem('xv_chat_scope') === 'local' ? 'local' : 'world'; } catch { return 'world'; }
   });
@@ -270,11 +276,10 @@ function ChatBox() {
       {open && (
         <>
           <div className="chat-log" ref={logRef}>
-            {chat.map((m) => (
-              <div key={m.id} className={`chat-line ${m.kind} ${m.scope === 'local' ? 'local' : ''}`}>
-                {m.scope === 'local' && <i className="chat-tag">📍</i>}{m.name && <b>{m.name}: </b>}{m.text}
-              </div>
+            {chat.filter((m) => m.scope !== 'local').map((m) => (
+              <div key={m.id} className={`chat-line ${m.kind}`}>{m.name && <b>{m.name}: </b>}{m.text}</div>
             ))}
+            {scope === 'local' && <div className="chat-line system chat-local-hint">📍 Tin Tại chỗ chỉ hiện thành bong bóng trên đầu nhân vật — người đang ở cùng khu mới thấy.</div>}
           </div>
           {showEmo && (
             <div className="emotes">
@@ -287,7 +292,7 @@ function ChatBox() {
           </div>
           <form className="chat-input" onSubmit={submit}>
             <button type="button" className="emo-btn" onClick={() => setShowEmo(!showEmo)}>😊</button>
-            <input ref={inputRef} value={text} maxLength={120} onChange={(e) => setText(e.target.value)} placeholder={scope === 'world' ? 'Nói với cả xóm...' : 'Nói với người quanh đây...'}
+            <input ref={inputRef} value={text} maxLength={120} onChange={(e) => setText(e.target.value)} placeholder={scope === 'world' ? 'Nói với cả xóm...' : 'Nói trên đầu nhân vật...'}
               onKeyDown={(e) => { if (e.key === 'Escape') (e.target as HTMLInputElement).blur(); }} />
             <button className="btn small primary" onPointerDown={keepFocus} onMouseDown={keepFocus}>Gửi</button>
           </form>
@@ -304,26 +309,28 @@ function FarmToolbar() {
   const level = useStore((s) => s.me!.level);
   const seeds = Object.values(CROPS).filter((c) => (inv[`seed:${c.id}`] ?? 0) > 0);
   const plotCount = useStore((s) => s.farm?.plots.length ?? 0);
+  // Tải bảng đơn hàng khi về nông trại của mình (và mỗi phút một lần)
+  useEffect(() => { loadOrders(); const t = setInterval(loadOrders, 60_000); return () => clearInterval(t); }, []);
   return (
     <div className="farm-toolbar" role="region" aria-label="Công cụ nông trại">
-      <div className="farm-tools" role="group" aria-label="Chọn công cụ hoặc hạt giống">
-      <button className={`tool ${tool === 'auto' ? 'active' : ''}`} aria-pressed={tool === 'auto'} onClick={() => set({ farmTool: 'auto' })} title="Tưới / thu hoạch">
-        <span>🖐️</span><small>Chăm cây</small>
-      </button>
-      {seeds.map((c) => (
-        <button key={c.id} className={`tool ${tool === `seed:${c.id}` ? 'active' : ''}`} aria-label={`Gieo ${c.name}, còn ${inv[`seed:${c.id}`]} hạt`} aria-pressed={tool === `seed:${c.id}`} onClick={() => set({ farmTool: `seed:${c.id}` })} title={`Gieo ${c.name}`}>
-          <span>{c.icon}</span><small>{c.name}</small><b className="seed-count">{inv[`seed:${c.id}`]}</b>
+      <div className="farm-tools" role="group" aria-label="Công cụ nông trại">
+        {/* Chế độ chạm */}
+        <button className={`tool ${tool === 'auto' ? 'active' : ''}`} aria-pressed={tool === 'auto'} onClick={() => set({ farmTool: 'auto' })} title="Tưới / thu hoạch">
+          <span>🖐️</span><small>Chăm cây</small>
         </button>
-      ))}
-      <button className="tool" onClick={() => set({ panel: 'shop', shopTab: 'seed' })} title="Mua hạt giống">
-        <span>＋</span><small>Mua hạt</small>
-      </button>
-      <button className={`tool upgrade ${tool === 'upgrade' ? 'active' : ''} ${plotCount < MAX_PLOTS ? 'locked' : ''}`} aria-pressed={tool === 'upgrade'} onClick={() => set({ farmTool: tool === 'upgrade' ? 'auto' : 'upgrade' })}
-        title={`Nâng cấp ô đất: sản lượng ×${ECON.plotUpgradeMult} · ${fmt(ECON.plotUpgradePrice)} xu`}>
-        <span>{plotCount < MAX_PLOTS ? '🔒' : '⬆️'}</span><small>Nâng đất</small>
-      </button>
+        <button className={`tool mode-up ${tool === 'upgrade' ? 'active' : ''}`} aria-pressed={tool === 'upgrade'} onClick={() => set({ farmTool: tool === 'upgrade' ? 'auto' : 'upgrade' })}
+          title="Nâng cấp ô đất hoặc vật nuôi">
+          <span>✨</span><small>Nâng cấp</small>
+        </button>
+        <i className="tool-sep" aria-hidden />
+        {/* Hạt giống */}
+        {seeds.map((c) => (
+          <button key={c.id} className={`tool ${tool === `seed:${c.id}` ? 'active' : ''}`} aria-label={`Gieo ${c.name}, còn ${inv[`seed:${c.id}`]} hạt`} aria-pressed={tool === `seed:${c.id}`} onClick={() => set({ farmTool: `seed:${c.id}` })} title={`Gieo ${c.name}`}>
+            <span>{c.icon}</span><small>{c.name}</small><b className="seed-count">{inv[`seed:${c.id}`]}</b>
+          </button>
+        ))}
       </div>
-      <span className="tool-hint" role="status">{tool === 'upgrade' && plotCount < MAX_PLOTS ? `🔒 Mở hết ${MAX_PLOTS} ô đất mới nâng cấp được · đang có ${plotCount}/${MAX_PLOTS}` : tool === 'upgrade' ? `Chạm ô đất để nâng thành ✨ Đất màu mỡ · sản lượng ×${String(ECON.plotUpgradeMult).replace('.', ',')} · ${fmt(ECON.plotUpgradePrice)} xu` : tool.startsWith('seed:') ? `Gieo ${CROPS[tool.slice(5)]?.name} · Chạm ô đất trống` : seeds.length ? 'Chạm cây để tưới nước hoặc thu hoạch' : `Hết hạt giống · Ghé cửa hàng để mua thêm · Lv${level}`}</span>
+      <span className="tool-hint" role="status">{tool === 'upgrade' ? `Chạm con vật để nâng cấp ⭐ (thêm sản phẩm, ra nhanh hơn) · ${plotCount < MAX_PLOTS ? `Nâng đất cần mở hết ${MAX_PLOTS} ô (đang có ${plotCount})` : `chạm ô đất để thành ✨ Đất màu mỡ ×${String(ECON.plotUpgradeMult).replace('.', ',')} · ${fmt(ECON.plotUpgradePrice)} xu`}` : tool.startsWith('seed:') ? `Gieo ${CROPS[tool.slice(5)]?.name} · Chạm ô đất trống` : seeds.length ? 'Chạm cây để tưới nước hoặc thu hoạch' : `Hết hạt giống · Ghé cửa hàng để mua thêm · Lv${level}`}</span>
     </div>
   );
 }

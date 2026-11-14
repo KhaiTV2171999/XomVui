@@ -27,7 +27,7 @@ function DogCard({ level }: { level: number }) {
   );
 }
 
-type Tab = 'seed' | 'animal' | 'sell';
+type Tab = 'seed' | 'animal' | 'mat' | 'sell';
 
 export function ShopPanel() {
   const zoneKind = useStore((s) => s.zone?.kind);
@@ -39,7 +39,7 @@ function FarmShop() {
   useStore((s) => s.catalogVer); // vẽ lại khi bảng giá đổi
   const me = useStore((s) => s.me)!;
   const storedTab = useStore((s) => s.shopTab) as Tab;
-  const tab: Tab = (['seed', 'animal', 'sell'] as string[]).includes(storedTab) ? storedTab : 'seed';
+  const tab: Tab = (['seed', 'animal', 'mat', 'sell'] as string[]).includes(storedTab) ? storedTab : 'seed';
   const setTab = (t: Tab) => set({ shopTab: t });
 
   async function buy(itemId: string, qty = 1) {
@@ -62,8 +62,8 @@ function FarmShop() {
   };
 
   return (
-    <Modal title="🌱 Cửa hàng nông trại" onClose={() => set({ panel: null })} wide>
-      <Tabs<Tab> value={tab} onChange={setTab} tabs={[['seed', '🌱 Hạt giống'], ['animal', '🐔 Vật nuôi'], ['sell', '💰 Bán nông sản']]} />
+    <Modal title="🛒 Cửa hàng nông trại" onClose={() => set({ panel: null })} wide>
+      <Tabs<Tab> value={tab} onChange={setTab} tabs={[['seed', '🌱 Hạt giống'], ['animal', '🐔 Vật nuôi'], ['mat', '🪵 Vật liệu'], ['sell', '💰 Bán nông sản']]} />
 
       {tab === 'seed' && (
         <div className="shop-grid">
@@ -117,6 +117,33 @@ function FarmShop() {
             </div>
           </div>
         </div>
+      )}
+
+      {tab === 'mat' && (
+        <>
+          <p className="hint">Gỗ, đá dùng để mở rộng nông trại và lắp máy chế biến. Dọn đá / gốc cây trên nông trại cũng được miễn phí.</p>
+          <div className="shop-grid">
+            {(['mat:wood', 'mat:stone'] as const).map((id) => {
+              const it = ITEMS[id];
+              const have = me.inventory[id] ?? 0;
+              return (
+                <div key={id} className="shop-card">
+                  <div className="shop-icon">{it.icon}</div>
+                  <div className="shop-name">{it.name}</div>
+                  <div className="shop-meta">Đang có: {have} · bán lại {fmt(it.sell ?? 0)} xu</div>
+                  <div className="shop-actions">
+                    <button className="btn small" onClick={() => buy(id, 1)}>💰 {fmt(it.price!)}</button>
+                    <button className="btn small primary" onClick={() => buy(id, 10)}>x10 · {fmt(it.price! * 10)}</button>
+                  </div>
+                  <div className="shop-actions">
+                    <button className="btn small" disabled={!have} onClick={() => sell(id, 1)}>Bán 1</button>
+                    <button className="btn small" disabled={!have} onClick={() => sell(id, have)}>Bán hết · {fmt((it.sell ?? 0) * have)}</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {tab === 'sell' && (

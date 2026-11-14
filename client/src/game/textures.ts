@@ -1242,3 +1242,85 @@ export function roadSceneTextures(scene: Phaser.Scene) {
     ctx.fillStyle = '#7fb85a'; ctx.fillRect(0, 158, 512, 12);
   });
 }
+
+/** Gốc cây (chướng ngại dọn được ở nông trại). */
+export function stumpTexture(scene: Phaser.Scene) {
+  return tex(scene, 'stump', 74, 56, (ctx) => {
+    shadow(ctx, 37, 48, 32, 7, 0.25);
+    ctx.fillStyle = lin(ctx, 0, 18, 0, 50, [[0, '#9a6a3f'], [1, '#6e4626']]);
+    ctx.beginPath(); ctx.moveTo(10, 46); ctx.lineTo(14, 20); ctx.lineTo(60, 20); ctx.lineTo(64, 46); ctx.quadraticCurveTo(37, 54, 10, 46); ctx.fill();
+    // rễ
+    ctx.beginPath(); ctx.moveTo(8, 47); ctx.quadraticCurveTo(2, 50, 4, 54); ctx.lineTo(16, 48); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(66, 47); ctx.quadraticCurveTo(72, 50, 70, 54); ctx.lineTo(58, 48); ctx.fill();
+    // mặt cắt + vân gỗ
+    ctx.fillStyle = '#e8c58f'; ctx.beginPath(); ctx.ellipse(37, 20, 23, 8, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#b98a52'; ctx.lineWidth = 1.4;
+    for (const r of [5, 10, 15]) { ctx.beginPath(); ctx.ellipse(37, 20, r * 1.4, r * 0.5, 0, 0, 7); ctx.stroke(); }
+    ctx.fillStyle = '#7fb85a'; ctx.beginPath(); ctx.ellipse(56, 18, 6, 3, -0.5, 0, 7); ctx.fill();
+  });
+}
+
+/** Máy chế biến (Sân xưởng) — mỗi máy một hình riêng. Gốc ở chân (giữa đáy). 140×140. */
+export function machineTexture(scene: Phaser.Scene, id: string) {
+  return tex(scene, `machine_${id}`, 140, 140, (ctx) => {
+    shadow(ctx, 70, 128, 52, 9, 0.25);
+    if (id === 'oven') {
+      ctx.fillStyle = lin(ctx, 92, 0, 108, 0, [[0, '#9c5a43'], [1, '#7a4030']]); rr(ctx, 92, 14, 18, 40, 3); ctx.fill();
+      ctx.fillStyle = '#5a2f22'; rr(ctx, 89, 10, 24, 8, 3); ctx.fill();
+      ctx.fillStyle = lin(ctx, 0, 40, 0, 128, [[0, '#d9785a'], [1, '#a84d36']]);
+      ctx.beginPath(); ctx.moveTo(22, 128); ctx.lineTo(22, 80); ctx.quadraticCurveTo(22, 40, 70, 40); ctx.quadraticCurveTo(118, 40, 118, 80); ctx.lineTo(118, 128); ctx.closePath(); ctx.fill();
+      ctx.save(); ctx.clip();
+      ctx.strokeStyle = 'rgba(90,40,25,.5)'; ctx.lineWidth = 1.5;
+      for (let y = 58; y < 126; y += 12) { ctx.beginPath(); ctx.moveTo(20, y); ctx.lineTo(120, y); ctx.stroke(); }
+      for (let y = 46, k = 0; y < 126; y += 12, k++) for (let x = 30 + (k % 2) * 12; x < 118; x += 24) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 12); ctx.stroke(); }
+      ctx.restore();
+      ctx.fillStyle = '#3a1d14'; ctx.beginPath(); ctx.moveTo(46, 122); ctx.lineTo(46, 96); ctx.quadraticCurveTo(46, 78, 70, 78); ctx.quadraticCurveTo(94, 78, 94, 96); ctx.lineTo(94, 122); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = rad(ctx, 70, 116, 2, 26, [[0, '#fff3b0'], [0.4, '#ffb703'], [1, 'rgba(230,57,70,0)']]); ctx.beginPath(); ctx.ellipse(70, 112, 22, 16, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#7a4030'; rr(ctx, 18, 122, 104, 8, 3); ctx.fill();
+    } else if (id === 'press') {
+      ctx.fillStyle = lin(ctx, 24, 0, 116, 0, [[0, '#a46b3d'], [0.5, '#c98d55'], [1, '#8d5a30']]);
+      ctx.beginPath(); ctx.moveTo(28, 128); ctx.quadraticCurveTo(20, 96, 30, 62); ctx.lineTo(110, 62); ctx.quadraticCurveTo(120, 96, 112, 128); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#5c3a1e'; ctx.lineWidth = 2;
+      for (const x of [48, 70, 92]) { ctx.beginPath(); ctx.moveTo(x, 63); ctx.lineTo(x + (x - 70) * 0.08, 127); ctx.stroke(); }
+      ctx.fillStyle = '#6b6f7a'; for (const y of [74, 112]) { rr(ctx, 24, y, 92, 6, 3); ctx.fill(); }
+      ctx.fillStyle = lin(ctx, 34, 0, 106, 0, [[0, '#b5651d'], [0.5, '#e09f3e'], [1, '#9c5214']]); ctx.beginPath(); ctx.ellipse(70, 60, 38, 12, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#c1121f'; ctx.beginPath(); ctx.ellipse(70, 58, 31, 8, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.5)'; for (const [x, y] of [[58, 56], [78, 59], [70, 55]]) { ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 7); ctx.fill(); }
+      for (const [x, c] of [[8, '#e63946'], [116, '#9b2335']] as const) {
+        ctx.fillStyle = 'rgba(255,255,255,.9)'; rr(ctx, x, 100, 16, 24, 4); ctx.fill();
+        ctx.fillStyle = c; rr(ctx, x + 2, 108, 12, 14, 3); ctx.fill();
+        ctx.fillStyle = '#f4d35e'; rr(ctx, x - 1, 96, 18, 6, 2); ctx.fill();
+      }
+    } else if (id === 'dairy') {
+      ctx.fillStyle = lin(ctx, 34, 0, 106, 0, [[0, '#9aa3ad'], [0.35, '#f1f4f7'], [1, '#7d8792']]);
+      ctx.beginPath(); ctx.moveTo(38, 128); ctx.lineTo(34, 64); ctx.quadraticCurveTo(34, 48, 70, 48); ctx.quadraticCurveTo(106, 48, 106, 64); ctx.lineTo(102, 128); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#7d8792'; for (const y of [76, 108]) { rr(ctx, 33, y, 74, 5, 2.5); ctx.fill(); }
+      ctx.fillStyle = '#c9d1d9'; ctx.beginPath(); ctx.ellipse(70, 48, 30, 8, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#5c6670'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(70, 46); ctx.lineTo(70, 22); ctx.lineTo(94, 22); ctx.stroke();
+      ctx.fillStyle = '#d62828'; ctx.beginPath(); ctx.arc(96, 22, 6, 0, 7); ctx.fill();
+      ctx.fillStyle = '#4cc9f0'; rr(ctx, 50, 86, 40, 16, 5); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('SỮA', 70, 98);
+    } else {
+      ctx.strokeStyle = '#8d5a30'; ctx.lineWidth = 8; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(28, 128); ctx.lineTo(34, 30); ctx.moveTo(112, 128); ctx.lineTo(106, 30); ctx.stroke();
+      ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(26, 34); ctx.lineTo(114, 34); ctx.moveTo(28, 100); ctx.lineTo(112, 100); ctx.stroke();
+      const cols = ['#ef476f', '#ffd166', '#06d6a0', '#4cc9f0', '#9b72cf'];
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 13; i++) { const x = 40 + i * 5; ctx.strokeStyle = cols[i % cols.length]; ctx.beginPath(); ctx.moveTo(x, 38); ctx.lineTo(x, 96); ctx.stroke(); }
+      for (let i = 0; i < 5; i++) { ctx.fillStyle = cols[i]; ctx.fillRect(38, 70 + i * 5, 64, 5); }
+      ctx.fillStyle = '#ef476f'; ctx.beginPath(); ctx.arc(54, 118, 9, 0, 7); ctx.fill();
+      ctx.fillStyle = '#4cc9f0'; ctx.beginPath(); ctx.arc(84, 120, 8, 0, 7); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 1.5;
+      for (const [x, y, r] of [[54, 118, 6], [84, 120, 5]]) { ctx.beginPath(); ctx.arc(x, y, r, 0.4, 2.6); ctx.stroke(); }
+    }
+  });
+}
+
+/** Bệ đá tròn dưới máy chế biến (ảnh tĩnh — rẻ hơn Graphics vẽ lại mỗi khung hình). */
+export function padTexture(scene: Phaser.Scene) {
+  return tex(scene, 'machine_pad', 136, 50, (ctx) => {
+    ctx.fillStyle = '#b3a78f'; ctx.beginPath(); ctx.ellipse(68, 27, 66, 23, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#d8cfbd'; ctx.beginPath(); ctx.ellipse(68, 23, 62, 20, 0, 0, 7); ctx.fill();
+  });
+}

@@ -191,3 +191,15 @@ export function bcOverview() {
     winners: st.lastWinners,
   };
 }
+
+/** Người đang ở bàn Bầu cua (để chat tại bàn). */
+export function baucuaMates(): number[] {
+  const ids = getIo().sockets.adapter.rooms.get(ROOM);
+  if (!ids) return [];
+  const out: number[] = [];
+  for (const sid of ids) {
+    const uid = getIo().sockets.sockets.get(sid)?.data?.userId;
+    if (typeof uid === 'number') out.push(uid);
+  }
+  return out;
+}

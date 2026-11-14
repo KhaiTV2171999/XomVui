@@ -36,7 +36,22 @@ export function publicPlayer(p: OnlinePlayer) {
 }
 
 /** Gửi lại toàn bộ thông tin cá nhân (xu, cấp, túi đồ...) cho người chơi. */
-export async function pushMe(userId: number) {
+/**
+ * Gửi lại thông tin cá nhân — gom các lần gọi sát nhau (bấm nhanh liên tục) thành 1 lần gửi sau ~60ms.
+ */
+const mePending = new Map<number, Promise<void>>();
+export function pushMe(userId: number): Promise<void> {
+  const cur = mePending.get(userId);
+  if (cur) return cur;
+  const pr = new Promise<void>((res) => setTimeout(() => {
+    mePending.delete(userId);
+    pushMeNow(userId).catch((e) => console.error('[pushMe]', e)).finally(res);
+  }, 60));
+  mePending.set(userId, pr);
+  return pr;
+}
+
+async function pushMeNow(userId: number) {
   const p = online.get(userId);
   if (!p) return;
   const [prof, inventory] = await Promise.all([getProfile(userId), getInventory(userId)]);

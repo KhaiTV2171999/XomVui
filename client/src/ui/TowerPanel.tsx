@@ -1,3 +1,4 @@
+import { SayBubble } from './GameChat';
 import { useEffect, useRef, useState } from 'react';
 import type { Appearance } from '../../../shared/catalog';
 import { drop, floors as floorsOf, hangX, newTower, swayAt, swingOf, TowerState, TW, WIND_FROM, windAt } from '../../../shared/tower';
@@ -202,10 +203,12 @@ function DuelGame({ room, meId, onExit }: { room: RoomView; meId: number; onExit
           onDrop={async (dt) => (await call('tw:drop', { dt }, { silent: true })) as DropOut} />
       )}
       <GameHud {...hud} />
+      <div className="tw-say-me"><SayBubble uid={meId} /></div>
       <div className="tw-duelbar">
         <div className="tw-opp">
+          <SayBubble uid={opp?.id} />
           <span className="tw-ava"><AvatarPreview appearance={opp?.appearance ?? me!.appearance} size={44} /></span>
-          <div><b>{opp?.name ?? '…'}</b><small>{opp?.floors ?? 0} tầng · {fmt(opp?.score ?? 0)} điểm · {'❤️'.repeat(Math.max(0, opp?.lives ?? 0))}{opp?.over ? ' · xong' : ''}</small></div>
+          <div><b>{opp?.name ?? '…'}</b><small>{opp?.floors ?? 0} tầng · {fmt(Math.max(0, opp?.score ?? 0))} điểm · {'❤️'.repeat(Math.max(0, opp?.lives ?? 0))}{opp?.over ? ' · xong' : ''}</small></div>
         </div>
         <div className={`tw-timer ${left <= 10 ? 'hot' : ''}`}>⏱ {left}s</div>
         {pot > 0 && <div className="tw-pot">💰 {fmt(pot)}</div>}
@@ -235,7 +238,7 @@ function GameHud({ score, floors, lives, combo }: { score: number; floors: numbe
   return (
     <div className="tw-hud">
       <div className="tw-hud-box"><small>Tầng</small><b>{floors}</b></div>
-      <div className="tw-hud-box"><small>Điểm</small><b>{fmt(score)}</b></div>
+      <div className="tw-hud-box"><small>Điểm</small><b>{fmt(Math.max(0, score))}</b></div>
       <div className="tw-hud-box lives">{Array.from({ length: TW.LIVES }, (_, i) => <span key={i} className={i < lives ? '' : 'lost'}>❤️</span>)}</div>
       {combo >= 2 && <div className="tw-combo">🔥 Combo ×{combo}</div>}
     </div>
@@ -243,6 +246,9 @@ function GameHud({ score, floors, lives, combo }: { score: number; floors: numbe
 }
 
 // ============================================================ Màn chơi (canvas)
+
+/** Tầng đang treo cao hơn đỉnh toà nhà bao nhiêu tầng */
+const HOOK_GAP = 2.4;
 
 const PALETTE = [
   ['#ffb3c7', '#e0839d'], ['#b5ead7', '#7cc7a8'], ['#ffe29a', '#e0b85a'], ['#c7d8ff', '#8fa8e0'], ['#e2c6ff', '#b28ee0'], ['#ffd1a8', '#e3a06d'],
@@ -301,7 +307,7 @@ function TowerCanvas({ seed, startAt, stopped, onDrop, onLocal }: {
       if (dt < TW.MIN_DT) return;
       const n = st.blocks.length;
       const x = hangX(seed, n, dt);
-      const hookY = topY() + TW.H * 3.2; // đo trước khi thêm tầng mới
+      const hookY = topY() + TW.H * HOOK_GAP; // đo trước khi thêm tầng mới
       const res = drop(st, dt)!;
       fall = { x: res.kind === 'miss' ? x : res.x, y: hookY, vy: 0, rot: 0, vr: 0, kind: res.kind, targetY: (n + 1) * TW.H, t0: now, sway: res.sway };
       if (res.kind === 'miss') { fall.vr = (x > 0 ? 1 : -1) * 0.06; sfx('error'); }
@@ -322,7 +328,7 @@ function TowerCanvas({ seed, startAt, stopped, onDrop, onLocal }: {
     function frame(now: number) {
       raf = requestAnimationFrame(frame);
       const W = cv.width, H = cv.height;
-      const scale = Math.min(W / (TW.W * 3.3), H / (TW.H * 6.2));
+      const scale = Math.min(W / (TW.W * 3.3), H / (TW.H * 7.2));
       // Rơi
       if (fall) {
         fall.vy += 0.9;
@@ -341,8 +347,9 @@ function TowerCanvas({ seed, startAt, stopped, onDrop, onLocal }: {
           spawnAt = now + 120;
         }
       }
-      // Camera theo đỉnh toà nhà
-      const target = Math.max(0, topY() - (H / scale) * 0.42);
+      // Camera: luôn thấy tầng đang treo ở gần mép trên (+ vài tầng trên cùng của toà nhà bên dưới)
+      const viewH = (H / scale) * 0.92;
+      const target = Math.max(0, topY() + TW.H * (HOOK_GAP + 1.6) - viewH);
       camY += (target - camY) * 0.08;
 
       // ---- Vẽ ----
@@ -400,7 +407,7 @@ function TowerCanvas({ seed, startAt, stopped, onDrop, onLocal }: {
       });
 
       // Cần cẩu + tầng đang treo
-      const hookY = topY() + TW.H * 3.2;
+      const hookY = topY() + TW.H * HOOK_GAP;
       if (!st.over && !stoppedRef.current) {
         const ready = now >= spawnAt;
         const dt = ready ? now - spawnAt : 0;

@@ -408,3 +408,10 @@ export function tlOverview() {
     players: list.reduce((n, t) => n + t.seats.filter((s) => s?.kind === 'human').length, 0),
   };
 }
+
+/** Người thật cùng bàn Tiến lên (để chat tại bàn). */
+export function tienlenMates(uid: number): number[] | null {
+  const id = userTable.get(uid);
+  const t = id != null ? tables.get(id) : undefined;
+  return t ? humans(t).map((h) => h.userId!) : null;
+}

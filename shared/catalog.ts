@@ -7,7 +7,7 @@ export const OPTIONAL_SLOTS: Slot[] = ['hat', 'acc', 'hand', 'mouth', 'ride'];
 /** Ô bán ở Tiệm thời trang / ở Cửa hàng vật phẩm. */
 export const FASHION_SLOTS: Slot[] = ['top', 'bottom', 'hat', 'acc'];
 export const GEAR_SLOTS: Slot[] = ['hand', 'mouth', 'ride'];
-export type ItemKind = 'seed' | 'produce' | 'feed' | 'clothing';
+export type ItemKind = 'seed' | 'produce' | 'feed' | 'clothing' | 'material';
 
 export interface Item {
   id: string;
@@ -68,21 +68,32 @@ export const ECON = {
   /** Cảnh sát ở lại mỗi nông trại bao lâu (giây) */
   policeStaySec: 15,
   /** Thời gian di chuyển giữa hai nhà (giây) */
-  policeGapSec: 40,
+  policeGapSec: 90,
   /** Cảnh sát ập tới: bắt ai đã trộm ở nhà này trong khoảng (giây) trước đó mà vẫn còn ở đây */
-  policeLookbackSec: 180,
+  policeLookbackSec: 90,
+  /** Cảnh sát vừa tới: kẻ trộm có bấy nhiêu giây để chạy khỏi nông trại */
+  policeGraceSec: 5,
+  /** Tỉ lệ cảnh sát bắt được kẻ trộm còn nán lại (0–1) */
+  policeCatchChance: 0.3,
+  /** Tỉ lệ một lượt cảnh sát nghỉ, không đi tuần (0–1) */
+  policeIdleChance: 0.3,
   /** Tiền phạt = fineBase × số lần vi phạm (xu, không về ai — tiền bị thu hồi) */
   fineBase: 100,
   /** Lao động công ích = jailMinPerOffense × số lần vi phạm (phút), tối đa jailMaxMin */
   jailMinPerOffense: 10,
   jailMaxMin: 120,
+  /** Bảo lãnh: giá = bailPerMin × số phút còn lại, tối thiểu bailMin (xu, nộp cho hệ thống) */
+  bailPerMin: 300,
+  bailMin: 3000,
+  /** Mỗi lần xin bảo lãnh cách nhau tối thiểu (phút) */
+  bailCooldownMin: 5,
   // ---- Nâng cấp ô đất ("Đất màu mỡ") ----
   /** Giá nâng cấp 1 ô đất (xu) */
-  plotUpgradePrice: 1500,
+  plotUpgradePrice: 10000,
   /** Cấp người chơi tối thiểu để nâng cấp đất */
   plotUpgradeLevel: 3,
-  /** Hệ số sản lượng của ô đã nâng cấp (1.5 = ×1,5) */
-  plotUpgradeMult: 1.5,
+  /** Hệ số sản lượng của ô đã nâng cấp (2 = ×2) */
+  plotUpgradeMult: 2,
   // ---- Trộm kiểu "lượm" (trộm sạch nhưng mất thời gian) ----
   /** Thời gian lượm cơ bản (giây) */
   stealSecBase: 3,
@@ -102,6 +113,52 @@ export const ECON = {
   salonSkin: 100,
   /** Bán lại quần áo, vật phẩm: nhận lại tỉ lệ này của giá mua (0–1) */
   resellRate: 0.5,
+  // ---- Mở rộng nông trại ----
+  /** Ruộng mới (18 ô): cấp, xu, gỗ, đá */
+  field2Level: 4,
+  field2Coins: 3000,
+  field2Wood: 4,
+  field2Stone: 2,
+  /** Sân xưởng: cấp, xu, gỗ, đá */
+  yardLevel: 5,
+  yardCoins: 5000,
+  yardWood: 6,
+  yardStone: 4,
+  /** Chướng ngại (đá, gốc cây, bụi) mọc lại sau bao nhiêu giờ */
+  obstacleRegrowH: 6,
+  // ---- Nâng cấp vật nuôi ----
+  /** Giá nâng = giá con vật × hệ số này × (cấp hiện tại + 1)² */
+  animalUpgradeCost: 10,
+  /** Mỗi cấp nhân sản lượng / lứa lên bao nhiêu lần (2 = ×2) */
+  animalUpgradeMult: 2,
+  /** Mỗi cấp nhanh hơn bao nhiêu (0.15 = 15%) */
+  animalUpgradeSpeed: 0.15,
+  // ---- Bảng đơn hàng ----
+  /** Số ô đơn hàng trên bảng */
+  orderSlots: 6,
+  /** Đơn trả gấp bao nhiêu lần giá bán thẳng */
+  orderBonus: 1.5,
+  /** Tỉ lệ đơn VIP (thưởng ×2) */
+  orderVipChance: 0.15,
+  /** Giao xong: đơn mới tới sau bao nhiêu phút */
+  orderRefillMin: 2,
+  /** Bỏ qua: đơn mới tới sau bao nhiêu phút */
+  orderSkipMin: 15,
+  // ---- Đơn hàng cư dân ----
+  /** Người đặt chỉ trả tỉ lệ này của giá trị đơn (hệ thống bù phần còn lại cho người giao) */
+  playerOrderPay: 0.8,
+  /** Phải giao đủ bấy nhiêu đơn dân làng mới được tự đăng đơn */
+  playerOrderUnlock: 10,
+  /** Số đơn đang mở tối đa mỗi người */
+  playerOrderMax: 3,
+  /** Đơn hết hạn sau bao nhiêu giờ (hoàn tiền) */
+  playerOrderHours: 24,
+  // ---- Vật liệu (Cửa hàng nông trại) ----
+  /** Giá mua 1 gỗ / 1 đá (xu) */
+  woodPrice: 150,
+  stonePrice: 250,
+  /** Bán lại vật liệu được tỉ lệ này của giá mua */
+  matSellRate: 0.4,
 };
 
 // ---- Bảng giá MẶC ĐỊNH: chỉ dùng để khởi tạo DB lần đầu. Sau đó DB là nguồn chính (game_crops, game_animals). ----
@@ -140,7 +197,7 @@ export interface CatalogPayload { crops: CropDef[]; animals: AnimalDef[]; econ: 
 export function applyCatalog(c: CatalogPayload) {
   for (const k of Object.keys(CROPS)) delete CROPS[k];
   for (const k of Object.keys(ANIMALS)) delete ANIMALS[k];
-  for (const k of Object.keys(ITEMS)) if (!k.startsWith('cl:')) delete ITEMS[k];
+  for (const k of Object.keys(ITEMS)) if (!k.startsWith('cl:') && !k.startsWith('mat:') && !k.startsWith('good:')) delete ITEMS[k];
   Object.assign(ECON, c.econ);
   for (const cr of c.crops) {
     CROPS[cr.id] = { ...cr };
@@ -152,6 +209,15 @@ export function applyCatalog(c: CatalogPayload) {
     ITEMS[a.product] = { id: a.product, name: a.productName, icon: a.productIcon, kind: 'produce', sell: a.productSell };
   }
   ITEMS['feed'] = { id: 'feed', name: 'Thức ăn gia súc', icon: '🌾', kind: 'feed', price: ECON.feedPrice };
+  setMatPrices();
+}
+
+/** Giá mua / bán gỗ, đá theo ECON (chỉnh trong DB). */
+function setMatPrices() {
+  for (const [id, price] of [['mat:wood', ECON.woodPrice], ['mat:stone', ECON.stonePrice]] as const) {
+    const it = ITEMS[id];
+    if (it) { it.price = price; it.sell = Math.max(1, Math.floor(price * ECON.matSellRate)); }
+  }
 }
 
 export function catalogSnapshot(): CatalogPayload {
@@ -254,6 +320,15 @@ for (const [id, slot, name, style, color, color2, price, level, speed, desc] of 
   };
 }
 
+// Vật liệu (dọn chướng ngại ở nông trại) — dùng để mở rộng đất, xây máy chế biến
+ITEMS['mat:wood'] = { id: 'mat:wood', name: 'Gỗ', icon: '🌲', kind: 'material' };
+ITEMS['mat:stone'] = { id: 'mat:stone', name: 'Đá', icon: '⛰️', kind: 'material' };
+setMatPrices();
+// Hàng chế biến (máy ở Sân xưởng)
+for (const [id, name, icon, sell] of [
+  ['banhngo', 'Bánh ngô', '🥞', 230], ['mutdau', 'Mứt dâu', '🍯', 380], ['phomai', 'Phô mai', '🧀', 480], ['aolen', 'Áo len', '🧥', 900],
+] as [string, string, string, number][]) ITEMS[`good:${id}`] = { id: `good:${id}`, name, icon, kind: 'produce', sell };
+
 /** Giá bán lại quần áo / vật phẩm (đồ tặng kèm 0 xu thì không bán được). */
 export function resellPrice(itemId: string) {
   const it = ITEMS[itemId];
@@ -303,9 +378,24 @@ export function xpToNext(level: number) {
   return 60 + level * 40;
 }
 
-export const MAX_PLOTS = 26;
+export const MAX_PLOTS = 32;
 export const START_PLOTS = 6;
-export const MAX_ANIMALS = 8;
+export const MAX_ANIMALS = 10;
+
+// ---- Nâng cấp vật nuôi: Lv1 → Lv2 → Lv3 ----
+export const ANIMAL_MAX_LVL = 2; // lvl 0 = Lv1
+/** Số sản phẩm mỗi lứa theo cấp con vật: mỗi cấp nhân với animalUpgradeMult (mặc định ×2) */
+export function animalQty(type: string, lvl = 0) {
+  return Math.round((ANIMALS[type]?.qty ?? 1) * ECON.animalUpgradeMult ** lvl);
+}
+/** Thời gian ra sản phẩm (giây) theo cấp con vật */
+export function animalProduceSec(type: string, lvl = 0) {
+  return Math.max(30, Math.round((ANIMALS[type]?.produceSec ?? 600) * (1 - ECON.animalUpgradeSpeed * lvl)));
+}
+/** Giá nâng con vật từ cấp lvl lên lvl+1: giá con vật × hệ số × (cấp + 1)² — rất đắt */
+export function animalUpgradeCost(type: string, lvl = 0) {
+  return Math.round((ANIMALS[type]?.price ?? 0) * ECON.animalUpgradeCost * (lvl + 1) ** 2);
+}
 export function plotPrice(currentCount: number) {
   return ECON.plotStep * (currentCount - 4);
 }

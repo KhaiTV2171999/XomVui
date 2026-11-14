@@ -234,3 +234,10 @@ async function takeExact(uid: number, amount: number) {
     return got;
   });
 }
+
+/** Người cùng phòng solo Xây nhà (để chat tại bàn). */
+export function towerMates(uid: number): number[] | null {
+  const id = userRoom.get(uid);
+  const r = id != null ? rooms.get(id) : undefined;
+  return r ? r.players.map((p) => p.id) : null;
+}

@@ -146,7 +146,7 @@ export function registerSocial(socket: Socket, p: OnlinePlayer) {
 }
 
 /** Loại vật phẩm được phép tặng (trang phục thì không). */
-const GIFTABLE = new Set(['produce', 'seed', 'feed']);
+const GIFTABLE = new Set(['produce', 'seed', 'feed', 'material']);
 
 /** Gửi số tin chưa đọc (theo từng người) cho người chơi. */
 export async function pushUnread(uid: number) {

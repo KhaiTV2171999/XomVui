@@ -25,8 +25,8 @@ export interface PlotData {
   /** 1 = Đất màu mỡ (sản lượng ×1,5) */
   lvl?: number;
 }
-export interface AnimalData { type: string; fedAt: number | null; produceMs: number; left?: number; stolenBy?: number[] }
-export interface FarmData { now: number; plots: PlotData[]; animals: AnimalData[]; dog?: boolean }
+export interface AnimalData { type: string; fedAt: number | null; produceMs: number; left?: number; stolenBy?: number[]; lvl?: number }
+export interface FarmData { now: number; plots: PlotData[]; animals: AnimalData[]; dog?: boolean; areas?: string[]; cleared?: Record<string, number>; machines?: Record<string, { job: { at: number; done: number } | null }> }
 
 export interface ZoneInfo {
   zone: string; kind: string; name: string; ownerId: number | null; ownerName: string | null;
@@ -40,7 +40,7 @@ export interface NewsItem { id: number; kind: string; text: string; userId: numb
 export interface Toast { id: number; msg: string; kind: 'info' | 'success' | 'error' }
 export interface FriendRow { id: number; name: string; level: number; online?: boolean; zone?: string | null }
 
-export type Panel = null | 'shop' | 'boutique' | 'quests' | 'inventory' | 'kho' | 'tui' | 'residents' | 'wardrobe' | 'friends' | 'messages' | 'map' | 'games' | 'baucua' | 'tienlen' | 'tower' | 'werewolf' | 'bus';
+export type Panel = null | 'shop' | 'boutique' | 'quests' | 'expand' | 'orders' | 'workshop' | 'inventory' | 'kho' | 'tui' | 'residents' | 'wardrobe' | 'friends' | 'messages' | 'map' | 'games' | 'baucua' | 'tienlen' | 'tower' | 'werewolf' | 'bus';
 
 export interface ChatMessage { id: number; from: number; to: number; text: string; at: number; read: boolean; fromName?: string }
 
@@ -69,13 +69,25 @@ interface State {
   /** Đang đi xe buýt giữa các khu. */
   traveling: boolean;
   /** Ngăn chat mở ngay trong khu giải trí (không rời bàn chơi). */
-  gameChat: null | 'community' | 'friends';
+  gameChat: null | 'table' | 'community' | 'friends';
+  /** Chat tại bàn: chỉ là bong bóng trên đầu người chơi (userId → câu nói gần nhất) */
+  tableSay: Record<number, { text: string; at: number }>;
   /** Tăng mỗi khi server gửi bảng giá mới → các bảng đang mở tự vẽ lại. */
   catalogVer: number;
   /** Bảng tin cộng đồng (mới nhất trước) */
   news: NewsItem[];
   /** Số tin mới chưa xem trên Bảng tin */
   newsUnread: number;
+  /** Khu đất đang chọn trong bảng Mở rộng */
+  expandArea: string | null;
+  /** Bảng đơn hàng của mình */
+  /** Máy đang xem trong bảng Xưởng */
+  workshopMachine: string | null;
+  /** Ô vừa gieo, đang chờ server xác nhận (gói cập nhật cũ không được xoá) */
+  pendingPlots: Record<number, PlotData>;
+  /** Cư dân đang xin bảo lãnh */
+  bails: { id: number; name: string; until: number; price: number }[];
+  orders: { slots: import('../../shared/orders').OrderSlot[]; offset: number } | null;
   /** Nhiệm vụ hằng ngày */
   quests: QuestState | null;
   /** Mở bảng Cư dân ở tab nào */
@@ -109,9 +121,15 @@ export const useStore = create<State>(() => ({
   unread: {},
   traveling: false,
   gameChat: null,
+  tableSay: {},
   catalogVer: 0,
   news: [],
   newsUnread: 0,
+  expandArea: null,
+  orders: null,
+  workshopMachine: null,
+  pendingPlots: {},
+  bails: [],
   quests: null,
   resTab: 'list',
   gift: null,

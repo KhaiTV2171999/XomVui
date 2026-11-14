@@ -32,6 +32,7 @@ export function connect(token: string) {
   socket.on('connect', () => {
     set({ connected: true });
     call('quest:list', {}, { silent: true }).then((r) => r.ok && set({ quests: r.state as never }));
+    call('bail:list', {}, { silent: true }).then((r) => r.ok && set({ bails: r.list as never }));
     // Tải vài tin chat cộng đồng gần nhất nếu khung chat chưa có tin nào
     if (!get().chat.some((m) => m.kind === 'chat')) {
       call('chat:history', {}, { silent: true }).then((r) => {
@@ -50,6 +51,7 @@ export function connect(token: string) {
 
   socket.on('me', (me: Me) => set({ me }));
   socket.on('quest:state', (q) => set({ quests: q }));
+  socket.on('bail:list', (l) => set({ bails: l }));
   // Bảng giá nông trại (lưu trong DB server) — nạp vào CROPS/ANIMALS/ITEMS dùng chung, rồi vẽ lại giao diện
   socket.on('catalog', (c: CatalogPayload) => {
     applyCatalog(c);
@@ -69,8 +71,14 @@ export function connect(token: string) {
   socket.on('player:leave', (d: { id: number }) => bus.emit('leave', d));
   socket.on('player:move', (d: { id: number; x: number; y: number }) => bus.emit('move', d));
   socket.on('player:appearance', (d: { id: number; appearance: Appearance }) => bus.emit('appearance', d));
+  // Chat tại bàn: hiện bong bóng trên đầu người nói (không lưu thành khung tin nhắn)
+  socket.on('game:chat', (d: { id: number; text: string }) => {
+    set((s) => ({ tableSay: { ...s.tableSay, [d.id]: { text: d.text, at: Date.now() } } }));
+    sfx('pop');
+  });
   socket.on('player:chat', (d: { id: number; name: string; text: string; scope?: 'local' }) => {
-    addChat({ kind: 'chat', name: d.name, text: d.text, scope: d.scope });
+    // Tại chỗ: chỉ là bong bóng trên đầu nhân vật (không ghi vào khung chat)
+    if (d.scope !== 'local') addChat({ kind: 'chat', name: d.name, text: d.text });
     bus.emit('chat', d);
   });
   // Lời mời vào làng Ma Sói (bật lên ở bất cứ đâu trong game)
@@ -102,6 +110,9 @@ export function connect(token: string) {
   socket.on('pm:unread', ({ counts }: { counts: Record<number, number> }) => set({ unread: counts }));
   socket.on('farm:update', ({ ownerId, farm }: { ownerId: number; farm: FarmData }) => {
     if (get().zone?.ownerId !== ownerId) return;
+    // Giữ các ô vừa gieo mà server chưa kịp ghi nhận (tránh cây biến mất rồi hiện lại)
+    const pend = get().pendingPlots;
+    if (Object.keys(pend).length) farm = { ...farm, plots: farm.plots.map((p, i) => (pend[i] && !p.crop ? pend[i] : p)) };
     set({ farm, timeOffset: farm.now - Date.now() });
     bus.emit('farm', farm);
   });

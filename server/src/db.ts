@@ -115,6 +115,20 @@ CREATE TABLE IF NOT EXISTS announcements (
   user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at BIGINT NOT NULL
 );
+-- Đơn hàng cư dân: người đặt trả trước (đã giảm giá), người giao nhận đủ giá
+CREATE TABLE IF NOT EXISTS player_orders (
+  id BIGSERIAL PRIMARY KEY,
+  buyer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  items JSONB NOT NULL,
+  full_price INTEGER NOT NULL,
+  pay INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at BIGINT NOT NULL,
+  expires_at BIGINT NOT NULL,
+  filled_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS player_orders_open ON player_orders (status, created_at DESC);
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS orders_done INTEGER NOT NULL DEFAULT 0;
 -- Nhiệm vụ hằng ngày: tiến độ + đã nhận thưởng (mỗi người mỗi ngày một dòng)
 CREATE TABLE IF NOT EXISTS quest_days (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -190,8 +204,16 @@ export interface Animal {
   left?: number;
   /** Ai đã trộm lứa này */
   stolenBy?: number[];
+  /** Cấp con vật: 0 = Lv1 … ANIMAL_MAX_LVL */
+  lvl?: number;
 }
-export interface Farm { plots: Plot[]; animals: Animal[]; /** Có chó giữ nhà */ dog?: boolean }
+export interface Farm {
+  plots: Plot[]; animals: Animal[]; /** Có chó giữ nhà */ dog?: boolean;
+  /** Khu đất đã mở rộng */ areas?: string[];
+  /** Chướng ngại đã dọn: id → lúc dọn (mọc lại sau obstacleRegrowH giờ) */ cleared?: Record<string, number>;
+  /** Bảng đơn hàng (xem shared/orders.ts) */ orders?: unknown[]; orderSeq?: number;
+  /** Máy chế biến đã mua (xem shared/workshop.ts) */ machines?: Record<string, { job: { at: number; done: number } | null }>;
+}
 
 export const emptyPlot = (): Plot => ({ crop: null, plantedAt: 0, bonus: 0, waterStage: -1, yieldLeft: 0, stolenBy: [] });
 const newFarm = (): Farm => ({ plots: Array.from({ length: START_PLOTS }, emptyPlot), animals: [] });
@@ -501,4 +523,51 @@ export async function markChest(userId: number, day: string) {
 /** Dọn tiến độ nhiệm vụ cũ (quá 7 ngày). */
 export async function pruneQuests(beforeDay: string) {
   await all('DELETE FROM quest_days WHERE day < $1', [beforeDay]);
+}
+
+// ---- Đơn hàng cư dân ----
+export async function bumpOrdersDone(userId: number) {
+  await all('UPDATE profiles SET orders_done = orders_done + 1 WHERE user_id = $1', [userId]);
+}
+export async function ordersDone(userId: number): Promise<number> {
+  return (await one<{ n: number }>('SELECT orders_done AS n FROM profiles WHERE user_id = $1', [userId]))?.n ?? 0;
+}
+interface PORow { id: string; buyer_id: number; buyer_name: string; items: Record<string, number>; full_price: number; pay: number; status: string; created_at: string; expires_at: string; filled_name: string | null }
+const PO_SELECT = `SELECT o.*, b.name AS buyer_name, f.name AS filled_name FROM player_orders o
+  JOIN profiles b ON b.user_id = o.buyer_id LEFT JOIN profiles f ON f.user_id = o.filled_by`;
+function toPO(r: PORow) {
+  return { id: Number(r.id), buyerId: r.buyer_id, buyerName: r.buyer_name, items: r.items, full: r.full_price, pay: r.pay,
+    status: r.status as 'open', createdAt: Number(r.created_at), expiresAt: Number(r.expires_at), filledBy: r.filled_name };
+}
+export async function listOpenPlayerOrders(exceptUser: number, limit = 40) {
+  return (await all<PORow>(`${PO_SELECT} WHERE o.status = 'open' AND o.buyer_id <> $1 AND o.expires_at > $2 ORDER BY o.created_at DESC LIMIT $3`,
+    [exceptUser, Date.now(), limit])).map(toPO);
+}
+export async function listMyPlayerOrders(userId: number) {
+  return (await all<PORow>(`${PO_SELECT} WHERE o.buyer_id = $1 AND (o.status = 'open' OR o.created_at > $2) ORDER BY o.created_at DESC LIMIT 15`,
+    [userId, Date.now() - 3 * 86400_000])).map(toPO);
+}
+export async function countOpenPlayerOrders(userId: number) {
+  return (await one<{ n: number }>("SELECT count(*)::int AS n FROM player_orders WHERE buyer_id = $1 AND status = 'open'", [userId]))?.n ?? 0;
+}
+export async function insertPlayerOrder(buyer: number, items: Record<string, number>, full: number, pay: number, expiresAt: number) {
+  const r = await one<{ id: string }>('INSERT INTO player_orders (buyer_id, items, full_price, pay, created_at, expires_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+    [buyer, JSON.stringify(items), full, pay, Date.now(), expiresAt]);
+  return Number(r!.id);
+}
+/** Khoá đơn đang mở để giao / huỷ (trong transaction). */
+export async function takePlayerOrder(id: number, newStatus: string, filledBy: number | null) {
+  const r = await one<PORow>(`UPDATE player_orders SET status = $2, filled_by = $3 WHERE id = $1 AND status = 'open' RETURNING *, '' AS buyer_name, NULL AS filled_name`,
+    [id, newStatus, filledBy]);
+  return r ? toPO(r) : null;
+}
+/** Đơn quá hạn: đánh dấu hết hạn, trả về để hoàn tiền. */
+export async function expirePlayerOrders() {
+  return (await all<PORow>(`UPDATE player_orders SET status = 'expired' WHERE status = 'open' AND expires_at <= $1 RETURNING *, '' AS buyer_name, NULL AS filled_name`,
+    [Date.now()])).map(toPO);
+}
+
+/** Thả khỏi lao động công ích (được bảo lãnh). */
+export async function clearJail(userId: number) {
+  await all('UPDATE profiles SET jail_until = NULL WHERE user_id = $1', [userId]);
 }

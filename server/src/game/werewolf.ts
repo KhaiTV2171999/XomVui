@@ -537,3 +537,15 @@ export function registerWerewolf(socket: Socket, p: OnlinePlayer) {
     push(r);
   });
 }
+
+/**
+ * Người cùng làng Ma Sói (để chat tại bàn). Đang chơi thì không cho chat chữ
+ * (tránh lộ vai / sói bàn bạc công khai) — chỉ phòng chờ và lúc đã kết thúc.
+ */
+export function werewolfMates(uid: number): number[] | null | 'playing' {
+  const id = userRoom.get(uid);
+  const r = id != null ? rooms.get(id) : undefined;
+  if (!r) return null;
+  if (r.phase !== 'lobby' && r.phase !== 'end') return 'playing';
+  return r.players.filter((p) => !p.bot && !p.left).map((p) => p.id);
+}

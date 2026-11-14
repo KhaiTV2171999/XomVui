@@ -3,7 +3,7 @@ import { addAnnouncement, countResidents, friendStatus, listAnnouncements, listR
 import { getIo, handle, online, OnlinePlayer } from './online';
 
 /** Đăng một thông báo lên Bảng tin cộng đồng (lưu DB) và báo cho mọi người đang online. */
-export async function announce(kind: 'newbie' | 'police' | 'info', text: string, userId: number | null = null) {
+export async function announce(kind: 'newbie' | 'police' | 'info' | 'bail', text: string, userId: number | null = null) {
   const a = await addAnnouncement(kind, text, userId);
   getIo().emit('news', a);
   pruneAnnouncements().catch((e) => console.error('[news prune]', e));
